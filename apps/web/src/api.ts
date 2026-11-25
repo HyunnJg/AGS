@@ -3,7 +3,10 @@ import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 export async function api(token: string, path: string, method = "GET", value?: unknown) {
   const res = await fetch(path, {
     method,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(value !== undefined && { "Content-Type": "application/json" }),
+    },
     body: value === undefined ? undefined : JSON.stringify(value),
   });
   if (!res.ok) {

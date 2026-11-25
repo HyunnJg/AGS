@@ -26,7 +26,7 @@ test("중복 활성 턴을 막고 비정상 종료된 턴의 부분 텍스트와
     assert.equal(second.get(a.id)?.preset, "coding");
     assert.equal(second.get(a.id)?.title, "첫 작업");
     assert.deepEqual(
-      second.turns(a.id).map(row => ({ ...row })),
+      second.turns(a.id).map((row) => ({ ...row })),
       [
         {
           id: "turn1",
@@ -34,6 +34,8 @@ test("중복 활성 턴을 막고 비정상 종료된 턴의 부분 텍스트와
           reply: "받은 조각",
           status: "interrupted",
           preset: "coding",
+          provider: "mock",
+          model: "",
         },
       ],
     );

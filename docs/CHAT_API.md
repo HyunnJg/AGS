@@ -37,3 +37,11 @@
 | POST /api/sessions/{id}/chat | 기존 채팅 SSE 형식으로 응답하며 DB에 턴 저장. 같은 세션에서 응답 진행 중이면 409 |
 
 세션 채팅의 X-Request-ID는 저장된 턴 ID와 같고, 중단은 기존 취소 경로를 사용한다. done은 completed, cancelled는 cancelled, error는 failed 상태로 저장한다. 비정상 종료 후에도 streaming으로 남은 턴은 다음 시작 시 interrupted로 복구한다. 개별 요청만 검증하는 기존 POST /api/chat은 기록 없이 사용할 수 있다.
+
+## 공급자와 모델
+
+인증된 GET /api/providers는 공급자 ID, 설정 여부와 기본 모델 ID를 반환한다. 세션 경로에 PATCH로 `{"provider":"custom","model":"my-model"}`을 보내면 다음 턴의 공급자와 모델을 바꾼다. 각 턴에는 시작 시 선택한 공급자와 모델이 기록된다. 기존 세션과 이력은 mock으로 복원한다.
+
+외부 공급자는 현재 프리셋 지침과 해당 세션의 최근 완료 턴 최대 12개, 현재 메시지를 받는다. 진행 중이거나 취소·실패한 턴은 제외한다. 동일 세션의 중복 요청은 409다. 401/403과 429는 각각 고정된 provider_auth와 provider_limit 스트림 오류로 변환한다. 로컬 접속 인증 실패는 기존 HTTP 401로 구분한다. 브라우저에서 주소와 API 키를 지정하는 경로는 없다.
+
+SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송하며, DB에는 150ms 또는 8KiB마다 모아 저장하고 모든 정상 종료·취소·오류 처리 시 남은 텍스트를 저장한다. 프로세스가 강제 종료되면 마지막 체크포인트 이후의 텍스트가 유실될 수 있다.
