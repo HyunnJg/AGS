@@ -53,6 +53,14 @@ export class SessionStore {
           );
         END;
         CREATE TABLE IF NOT EXISTS sections(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS section_state_source(section TEXT PRIMARY KEY REFERENCES sections(id),
+          key TEXT NOT NULL, path TEXT NOT NULL, version TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memory_settings(id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO memory_settings VALUES(1,1);
+        CREATE TRIGGER IF NOT EXISTS clear_state_sources AFTER UPDATE OF root,identity ON projects
+        WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
+          DELETE FROM section_state_source WHERE section IN (SELECT id FROM sections WHERE projectId=NEW.id);
+        END;
         CREATE TABLE IF NOT EXISTS turns (
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
@@ -178,7 +186,10 @@ export class SessionStore {
           writable: !!row.writable,
         })),
       sections: this.db
-        .prepare("SELECT id,projectId,name FROM sections ORDER BY rowid")
+        .prepare(
+          `SELECT s.id,s.projectId,s.name,f.key AS stateKey,f.path AS statePath,f.version AS stateVersion
+          FROM sections s LEFT JOIN section_state_source f ON f.section=s.id ORDER BY s.rowid`,
+        )
         .all() as unknown as Section[],
     };
   }
@@ -204,6 +215,41 @@ export class SessionStore {
     return this.db.prepare("SELECT root,identity,writeGrant FROM projects WHERE id=?").get(id) as
       | { root: string | null; identity: string | null; writeGrant: string | null }
       | undefined;
+  }
+  memoryEnabled() {
+    return this.db.prepare("SELECT enabled FROM memory_settings WHERE id=1").get()?.enabled === 1;
+  }
+  setMemoryEnabled(enabled: boolean) {
+    this.db.prepare("UPDATE memory_settings SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  activeState(section: string) {
+    return this.db
+      .prepare(`SELECT f.key,f.path,f.version,p.root,p.identity FROM section_state_source f
+      JOIN sections s ON f.section=s.id JOIN projects p ON s.projectId=p.id
+      WHERE f.section=? AND p.root IS NOT NULL AND (SELECT enabled FROM memory_settings WHERE id=1)=1`)
+      .get(section) as
+      | { key: string; path: string; version: string; root: string; identity: string }
+      | undefined;
+  }
+  setStateSource(
+    project: string,
+    section: string,
+    previous: string | null,
+    path: string,
+    version: string | null,
+  ) {
+    const row = this.db
+      .prepare(`SELECT f.key FROM sections s LEFT JOIN section_state_source f ON s.id=f.section
+      WHERE s.id=? AND s.projectId=?`)
+      .get(section, project);
+    if (!row || row.key !== previous) return false;
+    if (version === null) this.db.prepare("DELETE FROM section_state_source WHERE section=?").run(section);
+    else
+      this.db
+        .prepare(`INSERT INTO section_state_source(section,key,path,version) VALUES(?,?,?,?)
+      ON CONFLICT(section) DO UPDATE SET key=excluded.key,path=excluded.path,version=excluded.version`)
+        .run(section, randomUUID(), path, version);
+    return true;
   }
   sectionExists(id: string) {
     return !!this.db.prepare("SELECT 1 FROM sections WHERE id=?").get(id);

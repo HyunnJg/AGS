@@ -1,6 +1,7 @@
 import { SourceEditor } from "./PromptLayout.tsx";
 import { useState, useEffect } from "react";
 import {
+  staleStateMessage,
   defaultLimits,
   isLimits,
   maxBudget,
@@ -131,6 +132,7 @@ export function ContextSettings({
                 : `출력 예약 ${preview.outputBudget}토큰`}
             </small>
           )}
+          {preview.stateStale && <output>{staleStateMessage}</output>}
           {!preview.fits && <p role="alert">지침과 현재 메시지가 남은 입력 예산을 넘습니다.</p>}
           {session.provider === "mock" && <small>로컬 mock은 외부로 전송하지 않습니다.</small>}
           {!!preview.excluded.length && (

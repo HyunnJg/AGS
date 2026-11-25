@@ -87,3 +87,9 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 목록과 파일 읽기 요청에도 화면에서 확인한 root를 함께 보낼 수 있다. 연결이 바뀌면 409를 반환한다. 링크, 장치 파일, 운영체제의 최상위 폴더, 서버 비공개 상태 폴더와 겹치는 루트는 파일 도구의 범위에서 제외한다. 단순 조회는 모델 입력을 바꾸지 않는다. 사용자가 첨부한 발췌는 대화의 로컬 DB에 보관하고, 다음 요청 조립 시 retrieval 위치에서 수동 참고 자료 뒤에 각각 user 역할로 포함한다. 입력 예산에 들어가지 않는 발췌는 통째로 제외한다. 활동 기록에는 본문이 저장되지 않는다.
 
 검색은 요청당 최대 1,500개 디렉터리 항목, 파일 읽기 시도 200개, 파일 본문 합계 8 MiB, 일치한 줄 50개로 제한한다. 한도 때문에 탐색이 일찍 끝나면 limited가 true다. `.git`, `node_modules`, `dist` 디렉터리와 링크는 탐색에서 제외한다.
+
+### 섹션 현재 상태
+
+프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.
+
+`GET /api/settings/section-memory`는 `{enabled}`를 반환하며 PUT으로 같은 형식을 저장한다. 기본값은 true다. 매 전송 시 지정한 파일의 버전을 검사한다. 버전 일치 시 미리보기와 공급자 요청에서 수동 장기기억 뒤에 독립된 user 메시지로 배치한다. 예산이 부족하면 상태 문서를 통째로 제외한다. 파일 변경·삭제 등으로 원본을 검증할 수 없는 경우 미리보기의 stateStale이 true이고 실제 전송 응답에는 `x-ags-section-state: stale`가 포함된다.

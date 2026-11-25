@@ -1,3 +1,4 @@
+import { staleStateMessage } from "../../../packages/contracts/src/context.ts";
 import { AttachedReferences } from "./FileReferences.tsx";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
@@ -173,6 +174,7 @@ function Conversation({
     try {
       const r = await api(token, `${path}/chat`, "POST", { message });
       accepted = true;
+      if (r.headers.get("x-ags-section-state") === "stale") setError(staleStateMessage);
       const id = r.headers.get("x-request-id") ?? "";
       setPendingId(id);
       setText("");

@@ -1,3 +1,4 @@
+import { loadSectionState } from "./section-state.ts";
 import { workspaceApi } from "./workspace-api.ts";
 import { WorkspaceError } from "./workspace-files.ts";
 import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -74,10 +75,13 @@ export function createChatServer(
     db: SessionStore,
     session: Session,
     message: string,
+    state: Awaited<ReturnType<typeof loadSectionState>>,
     limits: ContextLimits = db.limits(session.id),
   ) {
     const shared = db.promptSettings();
-    return assembleContext(
+    const current =
+      state && session.sectionId && db.activeState(session.sectionId)?.key === state.key ? state : undefined;
+    const assembled = assembleContext(
       session.preset,
       shared.prompt,
       limits,
@@ -87,7 +91,9 @@ export function createChatServer(
       shared.order,
       db.sources(session.id),
       db.references(session.id),
+      current?.text,
     );
+    return { ...assembled, stateStale: !!current?.stale };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -181,6 +187,15 @@ export function createChatServer(
       } else if (!store.setPrompt(body.prompt, body.previous))
         throw new RequestError(409, "settings_changed");
       return json(store.promptSettings());
+    }
+    if (path === "/api/settings/section-memory" && store) {
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || !("enabled" in body) || typeof body.enabled !== "boolean")
+          throw new RequestError(400, "invalid_setting");
+        store.setMemoryEnabled(body.enabled);
+      } else if (req.method !== "GET") return allow("GET, PUT");
+      return json({ enabled: store.memoryEnabled() });
     }
     if (path === "/api/settings/runtime") {
       if (req.method !== "GET") return allow("GET");
@@ -290,7 +305,8 @@ export function createChatServer(
         !isLimits(body.limits)
       )
         throw new RequestError(400, "invalid_preview");
-      return json(contextFor(store, store.get(session.id) ?? session, body.message, body.limits));
+      const state = await loadSectionState(store, session.sectionId);
+      return json(contextFor(store, store.get(session.id) ?? session, body.message, state, body.limits));
     }
     if (session && store && !route?.[2]) {
       if (req.method === "GET") return json({ session, turns: store.turns(session.id) });
@@ -328,8 +344,10 @@ export function createChatServer(
     const { message } = body;
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
+    const state = session && store ? await loadSectionState(store, session.sectionId) : undefined;
+    if (res.destroyed) return;
     if (session && store) session = store.get(session.id);
-    const context = session && store ? contextFor(store, session, message) : undefined;
+    const context = session && store ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
@@ -374,6 +392,7 @@ export function createChatServer(
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-store",
         "x-request-id": id,
+        ...(context?.stateStale && { "x-ags-section-state": "stale" }),
       });
       res.flushHeaders();
       const reply =

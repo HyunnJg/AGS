@@ -27,6 +27,7 @@ export function assembleContext(
   order: Block[] = defaultOrder,
   sources: SessionSources = emptySources,
   references: FileReference[] = [],
+  sectionState = "",
 ): ContextPreview {
   const system: Message = { role: "system", content: systemText(prompt, preset) };
   const request: Message = { role: "user", content: draft };
@@ -60,6 +61,7 @@ export function assembleContext(
 ${sources[block]}`,
           ]
         : [];
+      if (block === "memory" && sectionState) excerpts.push(sectionState);
       if (block === "retrieval")
         for (const ref of references)
           excerpts.push(`첨부 파일 (참고 자료) · ${ref.project} / ${ref.path} · ${ref.start}–${ref.end}줄

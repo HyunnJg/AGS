@@ -1,3 +1,4 @@
+import { SectionStateSource } from "./SectionMemory.tsx";
 import { FileWrite } from "./FileWrite.tsx";
 import { AttachLines } from "./FileReferences.tsx";
 import { WorkspaceActivity } from "./WorkspaceActivity.tsx";
@@ -6,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   DirectoryPage,
   FilePage,
+  Section,
   Project,
   WorkspaceCatalog,
 } from "../../../packages/contracts/src/workspace.ts";
@@ -52,7 +54,11 @@ function FileBrowser({
   token,
   project,
   current,
+  section,
+  refresh,
 }: {
+  section: Section;
+  refresh: (id: string) => Promise<void>;
   token: string;
   project: Project;
   current: Session | undefined;
@@ -112,6 +118,15 @@ function FileBrowser({
           </button>
         )}
       </header>
+      <SectionStateSource
+        key={section.id}
+        token={token}
+        project={project}
+        section={section}
+        path={view.path}
+        file={result?.file}
+        refresh={refresh}
+      />
       <WorkspaceSearch
         token={token}
         project={project}
@@ -276,11 +291,13 @@ function IndexLinks({ path, text, open }: { path: string; text: string; open: (p
   );
 }
 function ProjectFolder({
+  section,
   current,
   token,
   project,
   refresh,
 }: {
+  section: Section | undefined;
   token: string;
   project: Project;
   refresh: (id: string) => Promise<void>;
@@ -340,7 +357,9 @@ function ProjectFolder({
         </form>
         {error && <p role="alert">{error}</p>}
       </details>
-      {project.root && <FileBrowser token={token} project={project} current={current} />}
+      {project.root && section && (
+        <FileBrowser token={token} project={project} current={current} section={section} refresh={refresh} />
+      )}
     </>
   );
 }
@@ -527,6 +546,7 @@ export function ProjectWorkspace({
             </fieldset>
             <div hidden={activity}>
               <ProjectFolder
+                section={section}
                 current={current}
                 key={project.root ?? ""}
                 token={token}
