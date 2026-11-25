@@ -24,6 +24,7 @@ export class SessionStore {
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
           preset TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS favorite_models (provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(provider,model));
         CREATE INDEX IF NOT EXISTS turns_by_session ON turns(session_id);
         CREATE UNIQUE INDEX IF NOT EXISTS one_active_turn ON turns(session_id) WHERE status='streaming';
         UPDATE turns SET status='interrupted' WHERE status='streaming';
@@ -43,6 +44,17 @@ export class SessionStore {
     }
   }
 
+  favorites() {
+    return this.db
+      .prepare("SELECT provider,model FROM favorite_models ORDER BY provider,model")
+      .all() as unknown as ModelSelection[];
+  }
+  setFavorite({ provider, model }: ModelSelection, pinned: boolean) {
+    const sql = pinned
+      ? "INSERT OR IGNORE INTO favorite_models(provider,model) VALUES (?,?)"
+      : "DELETE FROM favorite_models WHERE provider=? AND model=?";
+    this.db.prepare(sql).run(provider, model);
+  }
   list() {
     return this.db.prepare("SELECT * FROM sessions ORDER BY rowid DESC").all() as unknown as Session[];
   }

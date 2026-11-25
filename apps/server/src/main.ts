@@ -6,13 +6,27 @@ import { localPort } from "./port.ts";
 import { createChatServer } from "./server.ts";
 import { SessionStore } from "./sessions.ts";
 
+function timeoutValue(raw: string | undefined, fallback: number) {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 2147483647) throw new Error("invalid_timeout");
+  return n;
+}
+
 try {
   const port = localPort(process.env.AGS_PORT);
   const directory = resolve(process.env.AGS_STATE_DIR || join(homedir(), ".ags", "private"));
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const providers = configureProviders(process.env);
   const store = new SessionStore(join(directory, "sessions.sqlite"));
-  const server = createChatServer(process.env.AGS_LOCAL_TOKEN ?? "", undefined, undefined, store, providers);
+  const server = createChatServer(
+    process.env.AGS_LOCAL_TOKEN ?? "",
+    undefined,
+    timeoutValue(process.env.AGS_IDLE_TIMEOUT_MS, 60_000),
+    store,
+    providers,
+    { totalTimeoutMs: timeoutValue(process.env.AGS_TIMEOUT_MS, 600_000), stateDirectory: directory },
+  );
   server.once("error", () => {
     store.close();
     console.error("서버를 열 수 없습니다. 사용 중인 포트를 확인해 주세요.");

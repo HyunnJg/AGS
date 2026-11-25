@@ -18,6 +18,17 @@ test(
     const token = randomBytes(32).toString("hex");
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     const fake = createServer(async (req, res) => {
+      if (req.url === "/v1/models") {
+        res.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({
+            data: [
+              { id: "ui/other-model", name: "First model" },
+              { id: "ui/test-model", name: "Second model", context_length: 16384 },
+            ],
+          }),
+        );
+        return;
+      }
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString());
@@ -79,6 +90,10 @@ test(
     await page.goto(base);
     await page.getByLabel("로컬 인증 토큰").fill(token);
     await page.getByRole("button", { name: "작업실 열기" }).click();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "고급 기능" }).click();
+    await page.getByText(dir, { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "첫 대화 시작" }).click();
     await page.getByLabel("프리셋").selectOption("coding");
     await page.getByLabel("메시지").fill("첫 작업");
@@ -106,7 +121,13 @@ test(
     assert.equal(await page.locator("article").count(), 1);
     await page.getByRole("button", { name: "모델 설정" }).click();
     await page.getByLabel("공급자", { exact: true }).selectOption("custom");
+    await page.getByLabel("모델 검색").fill("Second");
+    await page.getByRole("button", { name: /Second model/ }).click();
+    await page.getByRole("button", { name: "ui/test-model 즐겨찾기" }).click();
+    await page.locator('.pin[aria-pressed="true"]').waitFor();
     await page.getByRole("button", { name: "적용", exact: true }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    assert.match(await page.getByRole("button", { name: "모델 설정" }).innerText(), /ui\/test-model/);
     await page.getByLabel("메시지").fill("오래 걸리는 요청");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("독립 세션 응답", { exact: true }).waitFor();
@@ -125,6 +146,11 @@ test(
     await page.getByText("독립 세션 응답", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.locator('.pin[aria-pressed="true"]').waitFor();
+    assert.match(await page.getByRole("listitem").first().innerText(), /ui\/test-model/);
+    assert.ok(await page.locator("dialog").evaluate((el) => el.scrollWidth <= el.clientWidth));
+    await page.keyboard.press("Escape");
     assert.deepEqual(pageErrors, []);
   },
 );

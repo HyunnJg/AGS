@@ -19,9 +19,9 @@ function events(wire: string): ChatEvent[] {
   });
 }
 
-async function fixture(t: TestContext, provider?: Parameters<typeof createChatServer>[1], timeoutMs?: number) {
+async function fixture(t: TestContext, provider?: Parameters<typeof createChatServer>[1], timeoutMs?: number, totalTimeoutMs = 600_000) {
   const token = randomBytes(32).toString("hex");
-  const server = createChatServer(token, provider, timeoutMs);
+  const server = createChatServer(token, provider, timeoutMs, undefined, undefined, {totalTimeoutMs});
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address() as AddressInfo;
@@ -189,4 +189,14 @@ test("로컬 Host 대소문자를 정규화하고 다른 포트의 Origin은 거
   }
   assert.equal(await post(`http://${host.toLowerCase()}`), 200);
   assert.equal(await post("http://localhost:1"), 403);
+});
+
+test("응답이 계속 오면 유휴 타이머가 연장되고 전체 상한은 유지된다",async t=>{
+  const provider: NonNullable<Parameters<typeof createChatServer>[1]> = async function* (_,signal){
+    for(let i=0;i<8;i++){await delay(40,undefined,{signal});yield "계속";}
+  };
+  const active=await fixture(t,provider,200);
+  assert.equal(events(await (await active.chat("계속")).text()).at(-1)?.type,"done");
+  const capped=await fixture(t,provider,200,180);
+  assert.deepEqual(events(await (await capped.chat("상한")).text()).at(-1),{type:"error",code:"timeout"});
 });
