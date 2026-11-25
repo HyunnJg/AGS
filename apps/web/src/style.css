@@ -725,3 +725,9 @@ header h2 {
 .attached-references strong { overflow-wrap: anywhere; }
 .attached-references button { margin-left: .5rem; }
 .attached-references pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-write { margin: .6rem 0; }
+.file-write fieldset { padding:.6rem; min-width:0; border:1px solid #c7d0c5; }
+.file-write textarea { box-sizing:border-box; width:100%; font-family:monospace; }
+.file-write .removed { background:#f6e7e5; }
+.file-write .added { background:#e3f0e4; }
+.index-links { display:grid; gap:.25rem; }

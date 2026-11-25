@@ -1,4 +1,5 @@
 export class SearchResultChanged extends Error {}
+export class WriteConflict extends Error {}
 export class SettingsConflict extends Error {
   constructor() {
     super("다른 창에서 설정이 바뀌었습니다. 최신 내용과 비교해 주세요.");
@@ -12,6 +13,14 @@ const workspaceMessages: Record<string, string> = {
   invalid_search: "검색할 문구를 확인하세요.",
   reference_too_large: "6,000자 이하로 줄 범위를 좁혀 주세요. 화면에서 잘린 긴 줄은 첨부할 수 없습니다.",
   reference_limit: "대화에 첨부한 자료가 8개입니다. 기존 자료를 뺀 뒤 다시 첨부하세요.",
+  write_disabled: "이 폴더는 읽기 전용입니다. 연결 폴더 변경에서 승인형 저장을 켜세요.",
+  write_conflict: "원본 또는 폴더가 변경됐습니다. 최신 원본과 다시 비교하거나 새 파일 이름을 확인하세요.",
+  invalid_proposal: "수정안이 만료됐거나 폴더 연결이 바뀌었습니다. 다시 비교하세요.",
+  write_busy: "저장을 처리하고 있습니다. 잠시 후 확인하세요.",
+  no_changes: "원본과 내용이 같습니다.",
+  invalid_edit: "1 MiB 이하의 UTF-8 텍스트를 입력하세요.",
+  write_pending: "저장 완료 기록이 없습니다. 현재 원본과 백업을 확인하세요.",
+  write_failed: "파일을 저장하지 못했습니다. 파일 상태와 쓰기 권한을 확인하세요.",
   excluded_folder: "이 폴더는 기본 검색 범위에서 제외됩니다.",
   hardlink_not_supported: "하드링크 파일은 다른 경로와 내용을 공유해 열 수 없습니다.",
   search_result_changed: "검색 후 원본이 변경됐습니다. 다시 검색해 현재 줄을 확인하세요.",
@@ -53,6 +62,7 @@ export async function api(
     }
     if (path.startsWith("/api/projects")) {
       const body = await res.json().catch(() => ({}));
+      if (body.error === "write_conflict") throw new WriteConflict(workspaceMessages.write_conflict);
       if (body.error === "search_result_changed")
         throw new SearchResultChanged(workspaceMessages.search_result_changed);
       throw new Error(

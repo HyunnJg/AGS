@@ -36,7 +36,7 @@ function rejectRequest(res: ServerResponse, status: number, code: string) {
   res.end(JSON.stringify({ error: code }));
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, limit = maxBodyBytes): Promise<unknown> {
   if (req.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
     throw new RequestError(415, "expected_json");
   }
@@ -44,7 +44,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   let size = 0;
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > maxBodyBytes) throw new RequestError(413, "body_too_large");
+    if (size > limit) throw new RequestError(413, "body_too_large");
     chunks.push(chunk);
   }
   let body: unknown;

@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import type { FileActivity } from "../../../packages/contracts/src/workspace.ts";
 import { api, fileActivityError } from "./api.ts";
 
-const labels = { entries: "폴더 탐색", file: "파일 읽기", search: "본문 검색", attach: "대화에 첨부" };
+const labels = {
+  entries: "폴더 탐색",
+  file: "파일 읽기",
+  search: "본문 검색",
+  write: "파일 수정",
+  create: "파일 생성",
+  attach: "대화에 첨부",
+};
 export function WorkspaceActivity({ token, project }: { token: string; project: string }) {
   const [rows, setRows] = useState<FileActivity[]>();
   const [error, setError] = useState("");
@@ -35,7 +42,13 @@ export function WorkspaceActivity({ token, project }: { token: string; project: 
           {rows.map((r) => (
             <li key={r.id}>
               <strong>{labels[r.action]}</strong> ·{" "}
-              {r.error ? (r.error === "search_cancelled" ? "중단" : "실패") : "완료"}
+              {r.error
+                ? r.error === "write_pending"
+                  ? "결과 확인 필요"
+                  : r.error === "search_cancelled"
+                    ? "중단"
+                    : "실패"
+                : "완료"}
               <time dateTime={new Date(r.time).toISOString()}>
                 {new Date(r.time).toLocaleString("ko-KR")}
               </time>
@@ -45,6 +58,7 @@ export function WorkspaceActivity({ token, project }: { token: string; project: 
                   {r.start !== null && ` · ${r.start}–${r.end}줄`}
                 </span>
               )}
+              {r.backup && <small>직전 백업 · backups/{r.backup}</small>}
               {r.error && <small>{fileActivityError(r.error)}</small>}
             </li>
           ))}

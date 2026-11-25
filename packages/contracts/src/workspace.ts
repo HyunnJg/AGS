@@ -1,4 +1,5 @@
 export interface Project {
+  writable: boolean;
   id: string;
   name: string;
   root: string | null;
@@ -38,8 +39,9 @@ export interface WorkspaceSearch {
   limited: boolean;
 }
 
-export type FileAction = "entries" | "file" | "search" | "attach";
+export type FileAction = "entries" | "file" | "search" | "attach" | "write" | "create";
 export interface FileActivity {
+  backup: string|null;
   id: number;
   time: number;
   action: FileAction;
@@ -59,3 +61,12 @@ export interface FileReference {
 }
 export const maxReferenceChars = 6000;
 export const maxReferences = 8;
+
+export interface WritePreview {
+  id: string;
+  path: string;
+  action: "write" | "create";
+  first: number;
+  removed: string[];
+  added: string[];
+}

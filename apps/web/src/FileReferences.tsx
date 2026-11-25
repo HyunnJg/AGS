@@ -76,6 +76,7 @@ export function AttachLines({
   }
   return (
     <div className="attach-lines">
+      {page.clipped && <small>2,048자를 넘는 줄은 첨부 범위에서 빼 주세요.</small>}
       <form onSubmit={attach}>
         <label>
           첨부 시작 줄

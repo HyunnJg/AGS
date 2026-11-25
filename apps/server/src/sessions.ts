@@ -1,6 +1,6 @@
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
-import type { Project, Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
+import type { Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import type { RegisteredRoot } from "./workspace-files.ts";
 import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
 import {
@@ -83,6 +83,11 @@ export class SessionStore {
           "ALTER TABLE sessions ADD COLUMN sectionId TEXT REFERENCES sections(id); PRAGMA user_version=2",
         );
       }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 2) {
+        this.db.exec(
+          "ALTER TABLE projects ADD COLUMN writeGrant TEXT; ALTER TABLE file_activity ADD COLUMN backup TEXT; PRAGMA user_version=3",
+        );
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.close();
@@ -133,6 +138,14 @@ export class SessionStore {
     this.db.prepare("DELETE FROM file_references WHERE session=? AND id=?").run(session, id);
   }
 
+  beginApprovedWrite(project: string, action: "write" | "create", path: string) {
+    return this.db
+      .prepare("INSERT INTO file_activity(project,time,action,path,error) VALUES(?,?,?,?,?)")
+      .run(project, Date.now(), action, path, "write_pending").lastInsertRowid;
+  }
+  finishApprovedWrite(id: number | bigint, error: string | null, backup: string | null) {
+    this.db.prepare("UPDATE file_activity SET error=?,backup=? WHERE id=?").run(error, backup, id);
+  }
   recordFileActivity(
     project: string,
     action: FileAction,
@@ -148,7 +161,7 @@ export class SessionStore {
   fileActivity(project: string): FileActivity[] {
     return this.db
       .prepare(
-        "SELECT id,time,action,path,start,end,error FROM file_activity WHERE project=? ORDER BY id DESC LIMIT 100",
+        "SELECT id,time,action,path,start,end,error,backup FROM file_activity WHERE project=? ORDER BY id DESC LIMIT 100",
       )
       .all(project) as unknown as FileActivity[];
   }
@@ -156,8 +169,14 @@ export class SessionStore {
   catalog(): WorkspaceCatalog {
     return {
       projects: this.db
-        .prepare("SELECT id,name,root FROM projects ORDER BY rowid")
-        .all() as unknown as Project[],
+        .prepare("SELECT id,name,root, writeGrant IS NOT NULL AS writable FROM projects ORDER BY rowid")
+        .all()
+        .map((row) => ({
+          id: String(row.id),
+          name: String(row.name),
+          root: row.root as string | null,
+          writable: !!row.writable,
+        })),
       sections: this.db
         .prepare("SELECT id,projectId,name FROM sections ORDER BY rowid")
         .all() as unknown as Section[],
@@ -182,18 +201,19 @@ export class SessionStore {
     return id;
   }
   project(id: string) {
-    return this.db.prepare("SELECT root,identity FROM projects WHERE id=?").get(id) as
-      | { root: string | null; identity: string | null }
+    return this.db.prepare("SELECT root,identity,writeGrant FROM projects WHERE id=?").get(id) as
+      | { root: string | null; identity: string | null; writeGrant: string | null }
       | undefined;
   }
   sectionExists(id: string) {
     return !!this.db.prepare("SELECT 1 FROM sections WHERE id=?").get(id);
   }
-  linkRoot(id: string, previous: string | null, root: RegisteredRoot | null) {
+  linkRoot(id: string, previous: string | null, root: RegisteredRoot | null, writable = false) {
     return (
       this.db
-        .prepare("UPDATE projects SET root=?,identity=? WHERE id=? AND root IS ?")
-        .run(root?.path ?? null, root?.identity ?? null, id, previous).changes === 1
+        .prepare("UPDATE projects SET root=?,identity=?,writeGrant=? WHERE id=? AND root IS ?")
+        .run(root?.path ?? null, root?.identity ?? null, root && writable ? randomUUID() : null, id, previous)
+        .changes === 1
     );
   }
   displaySettings(): DisplaySettings {

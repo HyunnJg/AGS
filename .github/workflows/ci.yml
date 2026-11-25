@@ -25,7 +25,8 @@ jobs:
         run: |
           $package = Join-Path $env:RUNNER_TEMP "AGS-Windows"
           New-Item -ItemType Directory "$package/scripts" -Force | Out-Null
-          Copy-Item dist -Destination $package -Recurse
+          Copy-Item dist,examples -Destination $package -Recurse
+          if (!(Test-Path "$package/examples/P2-workspace/notes/intro.md")) { throw "Missing P2 example" }
           Copy-Item Start-AGS.cmd,README.md -Destination $package
           Copy-Item scripts/open-windows.mjs -Destination "$package/scripts"
           '{"type":"module"}' | Set-Content "$package/package.json" -Encoding utf8
