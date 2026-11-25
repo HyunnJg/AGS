@@ -33,6 +33,9 @@ test(
       for await (const chunk of req) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString());
       assert.equal(payload.model, "ui/test-model");
+      assert.equal(payload.max_tokens, 123);
+      assert.equal(payload.messages.length, 2);
+      assert.match(payload.messages[0].content, /테스트 공용 지침/);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write('data: {"choices":[{"delta":{"content":"독립 세션 응답"}}]}\n\n');
       // The browser test controls when this active request is cancelled.
@@ -119,9 +122,28 @@ test(
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
     assert.equal(await page.getByLabel("프리셋").inputValue(), "coding");
     assert.equal(await page.locator("article").count(), 1);
+    await page.getByLabel("메시지").fill("오래 걸리는 요청");
     await page.getByRole("button", { name: "모델 설정" }).click();
-    await page.getByLabel("공급자", { exact: true }).selectOption("custom");
+    await page.getByRole("button", { name: "공용 프롬프트" }).click();
+    await page.getByLabel("모든 대화의 공용 지침").fill("테스트 공용 지침");
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("dialog textarea")?.disabled &&
+        document.querySelector("dialog button[type=submit]")?.disabled,
+    );
+    await page.getByRole("button", { name: "컨텍스트 제어" }).click();
+    await page.getByLabel("최근 완료 대화 (턴)").fill("0");
+    await page.getByLabel("최대 출력 토큰").fill("123");
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await page.getByRole("button", { name: "전송 미리보기" }).click();
+    await page.getByText(/포함된 대화 0턴/).waitFor();
+    await page.getByText("현재 메시지", { exact: true }).click();
+    await page.locator("pre").filter({ hasText: "오래 걸리는 요청" }).waitFor();
+    await page.getByRole("button", { name: "공급사 · 모델" }).click();
+    await page.getByRole("button", { name: "사용자 지정 API", exact: true }).click();
     await page.getByLabel("모델 검색").fill("Second");
+    await page.getByRole("button", { name: "목록 새로고침" }).click();
     await page.getByRole("button", { name: /Second model/ }).click();
     await page.getByRole("button", { name: "ui/test-model 즐겨찾기" }).click();
     await page.locator('.pin[aria-pressed="true"]').waitFor();
@@ -132,6 +154,11 @@ test(
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("독립 세션 응답", { exact: true }).waitFor();
 
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    assert.ok(await page.getByRole("button", { name: "적용", exact: true }).isDisabled());
+    await page.getByRole("button", { name: "고급 기능" }).click();
+    await page.getByText(dir, { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "＋ 새 대화", exact: true }).click();
     await page.getByRole("heading", { name: "새 대화", exact: true }).waitFor();
     await page.getByRole("textbox", { name: "메시지" }).fill("별도 세션");

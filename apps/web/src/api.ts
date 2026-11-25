@@ -15,6 +15,12 @@ export async function api(token: string, path: string, method = "GET", value?: u
       window.dispatchEvent(new Event("ags-unauthorized"));
       throw new Error("로컬 인증 토큰을 확인해 주세요.");
     }
+    if (res.status === 422)
+      throw new Error(
+        "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",
+      );
+    if (res.status === 409 && path === "/api/settings/prompt")
+      throw new Error("다른 창에서 공용 지침을 변경했습니다. 탭을 다시 열어 최신 값을 확인하세요.");
     if (res.status === 409) throw new Error("이 대화에서 응답이 진행 중입니다.");
     throw new Error(`요청을 완료하지 못했습니다 (HTTP ${res.status}).`);
   }

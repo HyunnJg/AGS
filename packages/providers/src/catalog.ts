@@ -49,14 +49,18 @@ export function createCatalog(
     cache.set(provider, { models: result, expires: Date.now() + 300_000 });
     return result;
   }
-  return async (provider: ProviderId) => {
+  async function models(provider: ProviderId, refresh = false) {
     if (provider === "mock") return [];
     const current = cache.get(provider);
-    if (current && current.expires > Date.now()) return current.models;
+    if (!refresh && current && current.expires > Date.now()) return current.models;
     const active = pending.get(provider);
     if (active) return active;
     const request = load(provider).finally(() => pending.delete(provider));
     pending.set(provider, request);
     return request;
-  };
+  }
+  function contextWindow(provider: ProviderId, model: string) {
+    return cache.get(provider)?.models.find((row) => row.id === model)?.contextLength;
+  }
+  return { models, contextWindow };
 }

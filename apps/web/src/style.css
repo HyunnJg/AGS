@@ -516,3 +516,85 @@ header h2 {
     padding: 16px;
   }
 }
+.settings-tabs,
+.provider-pills,
+.limit-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.settings-tabs,
+.provider-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.settings-tabs {
+  margin-bottom: 18px;
+  border-bottom: 1px solid #d6ded4;
+}
+.settings-tabs button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 9px;
+  border-bottom: 2px solid transparent;
+}
+.settings-tabs button[aria-pressed="true"] {
+  border-color: #35634d;
+  color: #214d3b;
+  font-weight: 650;
+}
+.provider-pills legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.provider-pills button {
+  border-radius: 16px;
+  padding: 4px 11px;
+  font-size: 0.85rem;
+}
+.provider-pills button[aria-pressed="true"] {
+  background: #deebe0;
+  border-color: #8baa94;
+}
+.refresh-models {
+  justify-self: end;
+  font-size: 0.8rem;
+}
+.limit-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 9px;
+}
+.settings-detail textarea {
+  resize: vertical;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #bdcbbf;
+  border-radius: 6px;
+  padding: 8px;
+  background: white;
+}
+.settings-detail footer {
+  gap: 8px;
+}
+.context-preview {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #d6ded4;
+  padding-top: 8px;
+  font-size: 0.86rem;
+}
+.context-preview summary {
+  cursor: pointer;
+}
+.context-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 20dvh;
+  overflow: auto;
+}

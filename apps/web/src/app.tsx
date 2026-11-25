@@ -84,6 +84,9 @@ function Conversation({
   update,
   activity,
   openSettings,
+  onRemoteActivity,
+  text,
+  setText,
   visible,
 }: {
   token: string;
@@ -92,6 +95,9 @@ function Conversation({
   activity: (id: string, running: boolean) => void;
   visible: boolean;
   openSettings: () => void;
+  onRemoteActivity: (id: string, active: boolean) => void;
+  text: string;
+  setText: (value: string) => void;
 }) {
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -99,11 +105,15 @@ function Conversation({
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [pendingId, setPendingId] = useState("");
-  const [text, setText] = useState("");
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const sending = useRef(false);
   const remoteStreaming = !busy && turns.some((t) => t.status === "streaming");
+  useEffect(() => {
+    if (!remoteStreaming) return;
+    onRemoteActivity(session.id, true);
+    return () => onRemoteActivity(session.id, false);
+  }, [remoteStreaming, session.id, onRemoteActivity]);
   useEffect(() => {
     let alive = true;
     async function read() {
@@ -317,8 +327,15 @@ function Workspace({ token }: { token: string }) {
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
   const currentSession = sessions.find((s) => s.id === id);
+  const [remoteId, setRemoteId] = useState("");
+  const onRemoteActivity = useCallback(
+    (key: string, active: boolean) =>
+      setRemoteId((previous) => (active ? key : previous === key ? "" : previous)),
+    [],
+  );
   const [running, setRunning] = useState<string[]>([]);
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
@@ -403,7 +420,7 @@ function Workspace({ token }: { token: string }) {
         <button
           type="button"
           className="settings-launcher"
-          disabled={!ready || locked || running.includes(id)}
+          disabled={!ready || locked}
           onClick={() => setSettings(true)}
         >
           설정
@@ -413,7 +430,9 @@ function Workspace({ token }: { token: string }) {
         <SettingsCenter
           token={token}
           selection={currentSession ?? { provider: "mock", model: "" }}
-          sessionTitle={currentSession?.title}
+          session={currentSession}
+          draft={drafts[id] ?? ""}
+          streaming={running.includes(id) || Boolean(id && remoteId === id)}
           options={options}
           close={() => setSettings(false)}
           save={applyModel}
@@ -427,6 +446,9 @@ function Workspace({ token }: { token: string }) {
             session={current}
             activity={activity}
             visible={current.id === id}
+            text={drafts[current.id] ?? ""}
+            setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
+            onRemoteActivity={onRemoteActivity}
             openSettings={() => setSettings(true)}
             update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
           />

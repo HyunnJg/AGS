@@ -29,7 +29,8 @@ test(
   "호환 HTTP와 세션 API를 통해 오류 격리·부분 응답·인증·이력·취소를 검증한다",
   { timeout: 12000 },
   async (t) => {
-    const requests: { model: string; messages: { role: string; content: string }[] }[] = [];
+    const requests: { model: string; max_tokens?: number; messages: { role: string; content: string }[] }[] =
+      [];
     const closed = Promise.withResolvers<void>();
     let mode = "success";
     const upstream = await listen(
@@ -102,6 +103,31 @@ test(
       last?.messages.slice(1).map((m) => m.content),
       ["first", "한글", "next"],
     );
+    const limits = { turns: 1, inputBudget: 4000, outputBudget: 128 };
+    assert.equal((await call(`${path}/context`, "PUT", limits)).status, 200);
+    await call("/api/settings/prompt", "PUT", { prompt: "한글로 작성", previous: "" });
+    assert.equal(
+      (await call("/api/settings/prompt", "PUT", { prompt: "오래된 편집", previous: "" })).status,
+      409,
+    );
+    const callsBefore = requests.length;
+    const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
+    assert.equal(requests.length, callsBefore);
+    assert.equal(preview.includedTurns, 1);
+    assert.deepEqual(
+      preview.messages.slice(1).map((m: { content: string }) => m.content),
+      ["next", "한글", "다음"],
+    );
+    assert.match(preview.messages[0].content, /한글로 작성/);
+    assert.match(await (await send("다음")).text(), /event: done/);
+    assert.deepEqual(requests.at(-1)?.messages, preview.messages);
+    assert.equal(requests.at(-1)?.max_tokens, 128);
+    const before = store.turns(a.id).length;
+    await call(`${path}/context`, "PUT", { ...limits, inputBudget: 1 });
+    assert.equal((await send("큰 입력")).status, 422);
+    assert.equal(requests.length, callsBefore + 1);
+    assert.equal(store.turns(a.id).length, before);
+    await call(`${path}/context`, "PUT", limits);
     mode = "burst";
     writes.mock.resetCalls();
     assert.match(await (await send("burst")).text(), /event: done/);
@@ -123,6 +149,7 @@ test(
     }
     mode = "wait";
     const waiting = await send("cancel");
+    assert.equal((await call(path, "PATCH", { provider: "mock", model: "" })).status, 409);
     const reader = waiting.body?.getReader();
     assert.ok(reader);
     await reader.read();
@@ -141,6 +168,11 @@ test(
     assert.ok(!timeout.includes(secret));
     const b = await (await call("/api/sessions", "POST")).json();
     assert.equal(store.history(b.id).length, 0);
+    assert.deepEqual(await (await call(`/api/sessions/${b.id}/context`, "GET")).json(), {
+      turns: 12,
+      inputBudget: null,
+      outputBudget: null,
+    });
   },
 );
 test("OpenRouter 요청은 고정 호스트와 모델 ID를 쓰며 리디렉션을 차단한다", async () => {
@@ -155,7 +187,6 @@ test("OpenRouter 요청은 고정 호스트와 모델 ID를 쓰며 리디렉션�
   const chunks = [];
   for await (const chunk of providers.stream(
     { provider: "openrouter", model: "arbitrary/model" },
-    "general",
     [],
     new AbortController().signal,
   ))
@@ -212,6 +243,9 @@ test("모델 목록은 공급자별로 정규화하고 동시·반복 조회를 
   assert.deepEqual(b, expected);
   assert.deepEqual(await providers.models("custom"), expected);
   assert.equal(calls, 1);
+  assert.equal(providers.contextWindow("custom", "test/model"), 8192);
+  await Promise.all([providers.models("custom", true), providers.models("custom", true)]);
+  assert.equal(calls, 2);
 });
 
 test("목록 조회 실패 후에도 모델 ID 직접 적용과 즐겨찾기 저장이 된다", async (t) => {

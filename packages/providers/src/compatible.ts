@@ -1,18 +1,6 @@
 import { createCatalog } from "./catalog.ts";
 import type { ModelSelection, ProviderId, ProviderOption } from "../../contracts/src/providers.ts";
-import type { Preset } from "../../contracts/src/sessions.ts";
-
-export interface Message {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
-const instructions: Record<Preset, string> = {
-  general: "사용자의 요청에 맞추어 답하세요.",
-  coding: "코드의 정확성과 재현 가능한 검증을 우선하세요.",
-  research: "근거와 추론을 구분하고 출처의 한계를 명시하세요.",
-  writing: "사용자가 지정한 독자와 목적, 문체를 고려해 작성하세요.",
-};
+import type { Message } from "../../contracts/src/context.ts";
 
 function customEndpoint(base: string | undefined) {
   if (!base?.trim()) return undefined;
@@ -95,10 +83,10 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
   }
   async function* stream(
     selection: ModelSelection,
-    preset: Preset,
     messages: Message[],
     signal: AbortSignal,
     onActivity?: () => void,
+    outputBudget?: number | null,
   ) {
     const { url, key } = endpoint(selection.provider);
     if (!url || (selection.provider === "openrouter" && !key) || selection.provider === "mock")
@@ -116,7 +104,8 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         body: JSON.stringify({
           model: selection.model,
           stream: true,
-          messages: [{ role: "system", content: instructions[preset] }, ...messages],
+          messages,
+          ...(outputBudget != null && { max_tokens: outputBudget }),
         }),
       });
       if (
@@ -135,5 +124,5 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       throw new ProviderError("provider_failed");
     }
   }
-  return { options, stream, models: createCatalog(send, endpoint) };
+  return { options, stream, ...createCatalog(send, endpoint) };
 }
