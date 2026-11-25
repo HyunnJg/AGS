@@ -1,3 +1,4 @@
+import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
 import type { Project, Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import type { RegisteredRoot } from "./workspace-files.ts";
 import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -35,6 +36,16 @@ export class SessionStore {
           id TEXT PRIMARY KEY, title TEXT NOT NULL, preset TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,root TEXT,identity TEXT);
+        CREATE TABLE IF NOT EXISTS file_activity(
+          id INTEGER PRIMARY KEY, project TEXT NOT NULL REFERENCES projects(id), time INTEGER NOT NULL,
+          action TEXT NOT NULL, path TEXT, start INTEGER, end INTEGER, error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS activity_by_project ON file_activity(project,id);
+        CREATE TRIGGER IF NOT EXISTS trim_file_activity AFTER INSERT ON file_activity BEGIN
+          DELETE FROM file_activity WHERE project=NEW.project AND id <= (
+            SELECT id FROM file_activity WHERE project=NEW.project ORDER BY id DESC LIMIT 1 OFFSET 100
+          );
+        END;
         CREATE TABLE IF NOT EXISTS sections(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS turns (
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
@@ -71,6 +82,26 @@ export class SessionStore {
       this.db.close();
       throw error;
     }
+  }
+
+  recordFileActivity(
+    project: string,
+    action: FileAction,
+    path: string | null,
+    error: string | null,
+    start: number | null = null,
+    end: number | null = null,
+  ) {
+    this.db
+      .prepare("INSERT INTO file_activity(project,time,action,path,start,end,error) VALUES(?,?,?,?,?,?,?)")
+      .run(project, Date.now(), action, path, start, end, error);
+  }
+  fileActivity(project: string): FileActivity[] {
+    return this.db
+      .prepare(
+        "SELECT id,time,action,path,start,end,error FROM file_activity WHERE project=? ORDER BY id DESC LIMIT 100",
+      )
+      .all(project) as unknown as FileActivity[];
   }
 
   catalog(): WorkspaceCatalog {

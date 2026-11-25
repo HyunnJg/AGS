@@ -219,9 +219,11 @@ export async function searchWorkspace(
   scope: string,
   query: string,
   checkActive: () => void,
+  caseSensitive = true,
 ): Promise<WorkspaceSearch> {
   if (scope.split("/").some((part) => excluded.has(part.toLowerCase())))
     throw new WorkspaceError(400, "excluded_folder");
+  const literal = caseSensitive ? null : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu");
   const result: WorkspaceSearch = { hits: [], files: 0, skipped: 0, limited: false };
   const folders = [scope];
   let remainingEntries = 1500;
@@ -266,11 +268,11 @@ export async function searchWorkspace(
         continue;
       }
       result.files++;
-      if (!text.includes(query)) continue;
+      if (!(literal ? literal.test(text) : text.includes(query))) continue;
       const version = versionOf(text);
       const lines = text.split(/\r\n|\n|\r/);
       for (const [index, line] of lines.entries()) {
-        const hit = line.indexOf(query);
+        const hit = literal ? line.search(literal) : line.indexOf(query);
         if (hit < 0) continue;
         if (result.hits.length === 50) {
           result.limited = true;

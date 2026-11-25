@@ -449,7 +449,7 @@ function Workspace({ token }: { token: string }) {
     }
   }
   return (
-    <main className="layout">
+    <main className={projectsOpen ? "layout with-workspace" : "layout"}>
       <aside>
         <div className="brand">
           <Mark />
@@ -461,8 +461,10 @@ function Workspace({ token }: { token: string }) {
         <button
           type="button"
           className="project-launcher"
+          aria-expanded={projectsOpen}
+          aria-controls="project-workspace"
           disabled={!ready}
-          onClick={() => setProjectsOpen(true)}
+          onClick={() => setProjectsOpen((open) => !open)}
         >
           프로젝트 · 파일
         </button>
@@ -500,7 +502,7 @@ function Workspace({ token }: { token: string }) {
           openSession={(s) => {
             setSessions((prev) => (prev.some((item) => item.id === s.id) ? prev : [s, ...prev]));
             select(s.id);
-            setProjectsOpen(false);
+            if (!window.matchMedia("(min-width: 1000px)").matches) setProjectsOpen(false);
           }}
         />
       )}

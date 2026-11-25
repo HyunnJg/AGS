@@ -18,12 +18,15 @@ export async function workspaceApi(
   json: Json,
   allow: (methods: string) => void,
 ) {
-  const route = /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search))?$/.exec(path);
+  const route = /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity))?$/.exec(
+    path,
+  );
   if (!route) throw new WorkspaceError(404, "unknown_route");
   const [, id, action] = route;
   if (!id && req.method === "GET") return json(store.catalog());
   const project = id ? store.project(id) : undefined;
   if (id && !project) throw new WorkspaceError(404, "unknown_project");
+  if (action === "activity" && id) return req.method === "GET" ? json(store.fileActivity(id)) : allow("GET");
   const method = action === "root" ? "PUT" : "POST";
   if (req.method !== method) return allow(id ? method : "GET, POST");
   const body = await readBody(req);
@@ -61,6 +64,7 @@ export async function workspaceApi(
     };
     if (action === "search") {
       if (
+        ("caseSensitive" in body && typeof body.caseSensitive !== "boolean") ||
         !("query" in body) ||
         typeof body.query !== "string" ||
         !body.query.trim() ||
@@ -68,8 +72,15 @@ export async function workspaceApi(
         /[\r\n]/.test(body.query)
       )
         throw new WorkspaceError(400, "invalid_search");
-      const result = await searchWorkspace(root, body.path, body.query, checkActive);
+      const result = await searchWorkspace(
+        root,
+        body.path,
+        body.query,
+        checkActive,
+        !("caseSensitive" in body) || body.caseSensitive === true,
+      );
       checkActive();
+      store.recordFileActivity(id, "search", body.path, null);
       return json(result);
     }
     const listing = action === "entries";
@@ -83,13 +94,29 @@ export async function workspaceApi(
       ? await listEntries(root, body.path, n)
       : await readLines(root, body.path, n, version);
     checkActive();
+    if ("start" in result)
+      store.recordFileActivity(
+        id,
+        "file",
+        body.path,
+        null,
+        result.total ? result.start : null,
+        result.total ? result.end : null,
+      );
+    else store.recordFileActivity(id, "entries", body.path, null);
     return json(result);
   } catch (e) {
-    if (e instanceof WorkspaceError) throw e;
-    if (e && typeof e === "object" && "code" in e && ["ENOENT", "ENOTDIR", "ESTALE"].includes(String(e.code)))
-      throw new WorkspaceError(404, "path_unavailable");
-    if (e && typeof e === "object" && "code" in e && ["EACCES", "EPERM", "ELOOP"].includes(String(e.code)))
-      throw new WorkspaceError(403, "outside_workspace");
-    throw e;
+    const code = e && typeof e === "object" && "code" in e ? String(e.code) : "";
+    let error = e;
+    if (["ENOENT", "ENOTDIR", "ESTALE"].includes(code)) error = new WorkspaceError(404, "path_unavailable");
+    if (["EACCES", "EPERM", "ELOOP"].includes(code)) error = new WorkspaceError(403, "outside_workspace");
+    if (action === "entries" || action === "file" || action === "search")
+      store.recordFileActivity(
+        id,
+        action,
+        null,
+        error instanceof WorkspaceError ? error.message : "internal_error",
+      );
+    throw error;
   }
 }
