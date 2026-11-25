@@ -5,9 +5,16 @@ export class SettingsConflict extends Error {
 }
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
-export async function api(token: string, path: string, method = "GET", value?: unknown) {
+export async function api(
+  token: string,
+  path: string,
+  method = "GET",
+  value?: unknown,
+  signal?: AbortSignal,
+) {
   const res = await fetch(path, {
     method,
+    ...(signal && { signal }),
     headers: {
       Authorization: `Bearer ${token}`,
       ...(value !== undefined && { "Content-Type": "application/json" }),
@@ -22,6 +29,9 @@ export async function api(token: string, path: string, method = "GET", value?: u
     }
     if (path.startsWith("/api/projects")) {
       const messages: Record<string, string> = {
+        excluded_folder: "이 폴더는 기본 검색 범위에서 제외됩니다.",
+        hardlink_not_supported: "하드링크 파일은 다른 경로와 내용을 공유해 열 수 없습니다.",
+        search_result_changed: "검색 후 원본이 변경됐습니다. 다시 검색해 현재 줄을 확인하세요.",
         invalid_folder: "서버 PC에 있는 작업 폴더의 절대 경로를 입력하세요.",
         outside_workspace: "이 경로는 열 수 없습니다. 실제 작업 폴더와 접근 권한을 확인하세요.",
         path_unavailable: "경로를 찾을 수 없습니다. 폴더 연결과 파일 위치를 확인하세요.",

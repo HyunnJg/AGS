@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { lstat, open, opendir, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import type { DirectoryPage, FilePage } from "../../../packages/contracts/src/workspace.ts";
+import type { DirectoryPage, FilePage, WorkspaceSearch } from "../../../packages/contracts/src/workspace.ts";
 
 export class WorkspaceError extends Error {
   readonly status: number;
@@ -100,9 +101,10 @@ export async function listEntries(
   };
 }
 const maxBytes = 1024 * 1024;
-export async function readLines(root: RegisteredRoot, path: string, start: number): Promise<FilePage> {
+async function readText(root: RegisteredRoot, path: string, reserve?: (bytes: number) => void) {
   const node = await locate(root, path);
-  if (!node.stat.isFile() || node.stat.nlink !== 1n) deny();
+  if (!node.stat.isFile()) deny();
+  if (node.stat.nlink !== 1n) throw new WorkspaceError(403, "hardlink_not_supported");
   const handle = await open(
     node.target,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
@@ -118,6 +120,7 @@ export async function readLines(root: RegisteredRoot, path: string, start: numbe
     )
       deny();
     if (stat.size > maxBytes) throw new WorkspaceError(413, "file_too_large");
+    reserve?.(Number(stat.size));
     const data = Buffer.alloc(Number(stat.size));
     let used = 0;
     while (used < data.length) {
@@ -140,19 +143,154 @@ export async function readLines(root: RegisteredRoot, path: string, start: numbe
     }
     if (data.subarray(0, used).some((b) => b < 9 || (b > 13 && b < 32)))
       throw new WorkspaceError(415, "not_text");
-    const lines = text.split(/\r\n|\n|\r/);
-    if (lines.at(-1) === "") lines.pop();
-    if (start > Math.max(1, lines.length)) throw new WorkspaceError(400, "invalid_range");
-    const page = lines.slice(start - 1, start + 79);
-    const clipped = page.some((line) => line.length > 2048);
-    return {
-      start,
-      end: start - 1 + page.length,
-      total: lines.length,
-      clipped,
-      text: page.map((line) => line.slice(0, 2048)).join("\n"),
-    };
+    return text;
   } finally {
     await handle.close();
   }
+}
+
+function versionOf(text: string) {
+  return createHash("sha256").update(text).digest("hex");
+}
+export async function readLines(
+  root: RegisteredRoot,
+  path: string,
+  start: number,
+  version?: string,
+): Promise<FilePage> {
+  const text = await readText(root, path);
+  if (version && versionOf(text) !== version) throw new WorkspaceError(409, "search_result_changed");
+  const lines = text.split(/\r\n|\n|\r/);
+  if (lines.at(-1) === "") lines.pop();
+  if (start > Math.max(1, lines.length)) throw new WorkspaceError(400, "invalid_range");
+  const page = lines.slice(start - 1, start + 79);
+  const clipped = page.some((line) => line.length > 2048);
+  return {
+    start,
+    end: start - 1 + page.length,
+    total: lines.length,
+    clipped,
+    text: page.map((line) => line.slice(0, 2048)).join("\n"),
+  };
+}
+
+const excluded = new Set([".git", "node_modules", "dist"]);
+type SearchEntry = { name: string; directory: boolean };
+async function searchDirectory(root: RegisteredRoot, path: string, remaining: number) {
+  const node = await locate(root, path);
+  if (!node.stat.isDirectory()) throw new WorkspaceError(400, "not_directory");
+  const entries: SearchEntry[] = [];
+  let seen = 0;
+  let limited = false;
+  const dir = await opendir(node.target);
+  for await (const entry of dir) {
+    if (seen === remaining) {
+      limited = true;
+      break;
+    }
+    seen++;
+    if (!validPart(entry.name) || !(entry.isDirectory() || entry.isFile())) continue;
+    if (entry.isDirectory() && excluded.has(entry.name.toLowerCase())) continue;
+    entries.push({ name: entry.name, directory: entry.isDirectory() });
+  }
+  if ((await locate(root, path)).id !== node.id) deny();
+  entries.sort((a, b) => a.name.localeCompare(b.name, "ko") || (a.name < b.name ? -1 : 1));
+  return { entries, seen, limited };
+}
+function skipSearchEntry(e: unknown) {
+  if (e instanceof WorkspaceError)
+    return [
+      "outside_workspace",
+      "hardlink_not_supported",
+      "file_too_large",
+      "not_text",
+      "file_changed",
+    ].includes(e.message);
+  return (
+    !!e &&
+    typeof e === "object" &&
+    "code" in e &&
+    ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "ELOOP", "ESTALE"].includes(String(e.code))
+  );
+}
+
+export async function searchWorkspace(
+  root: RegisteredRoot,
+  scope: string,
+  query: string,
+  checkActive: () => void,
+): Promise<WorkspaceSearch> {
+  if (scope.split("/").some((part) => excluded.has(part.toLowerCase())))
+    throw new WorkspaceError(400, "excluded_folder");
+  const result: WorkspaceSearch = { hits: [], files: 0, skipped: 0, limited: false };
+  const folders = [scope];
+  let remainingEntries = 1500;
+  let remainingBytes = 8 * 1024 * 1024;
+  let attempted = 0;
+  traversal: for (const [i, folder] of folders.entries()) {
+    checkActive();
+    let dir: Awaited<ReturnType<typeof searchDirectory>>;
+    try {
+      dir = await searchDirectory(root, folder, remainingEntries);
+    } catch (e) {
+      if (i === 0 || !skipSearchEntry(e)) throw e;
+      result.skipped++;
+      continue;
+    }
+    remainingEntries -= dir.seen;
+    result.limited ||= dir.limited;
+    for (const entry of dir.entries) {
+      checkActive();
+      const path = folder ? `${folder}/${entry.name}` : entry.name;
+      if (entry.directory) {
+        folders.push(path);
+        continue;
+      }
+      if (++attempted > 200) {
+        result.limited = true;
+        break traversal;
+      }
+      let text: string;
+      try {
+        text = await readText(root, path, (bytes) => {
+          if (bytes > remainingBytes) throw new WorkspaceError(413, "search_budget");
+          remainingBytes -= bytes;
+        });
+      } catch (e) {
+        if (e instanceof WorkspaceError && e.message === "search_budget") {
+          result.limited = true;
+          break traversal;
+        }
+        if (!skipSearchEntry(e)) throw e;
+        result.skipped++;
+        continue;
+      }
+      result.files++;
+      if (!text.includes(query)) continue;
+      const version = versionOf(text);
+      const lines = text.split(/\r\n|\n|\r/);
+      for (const [index, line] of lines.entries()) {
+        const hit = line.indexOf(query);
+        if (hit < 0) continue;
+        if (result.hits.length === 50) {
+          result.limited = true;
+          break traversal;
+        }
+        const from = Math.max(0, hit - 32),
+          to = Math.min(line.length, hit + query.length + 48);
+        result.hits.push({
+          path,
+          line: index + 1,
+          version,
+          excerpt: (from ? "…" : "") + line.slice(from, to) + (to < line.length ? "…" : ""),
+        });
+      }
+    }
+    if (!remainingEntries && i + 1 < folders.length) {
+      result.limited = true;
+      break;
+    }
+  }
+  await locate(root, scope);
+  return result;
 }

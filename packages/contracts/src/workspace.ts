@@ -23,3 +23,16 @@ export interface FilePage {
   text: string;
   clipped: boolean;
 }
+
+export interface SearchHit {
+  path: string;
+  line: number;
+  excerpt: string;
+  version: string;
+}
+export interface WorkspaceSearch {
+  hits: SearchHit[];
+  files: number;
+  skipped: number;
+  limited: boolean;
+}
