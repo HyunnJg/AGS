@@ -1,3 +1,5 @@
+import { DisplayRules } from "./DisplayRules.tsx";
+import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { SharedPrompt } from "./PromptLayout.tsx";
 import { ContextSettings } from "./ContextSettings.tsx";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
@@ -199,6 +201,7 @@ export function SettingsCenter({
   close,
   save,
   session,
+  onRulesSaved,
   draft,
   streaming,
 }: {
@@ -208,6 +211,7 @@ export function SettingsCenter({
   close: () => void;
   save: (value: ModelSelection) => Promise<void>;
   session?: Session;
+  onRulesSaved: (rules: DisplayRule[]) => void;
   draft: string;
   streaming: boolean;
 }) {
@@ -272,7 +276,7 @@ export function SettingsCenter({
         <section className="settings-detail">
           {section === "모델" ? (
             <fieldset className="settings-tabs" aria-label="모델 설정 항목">
-              {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트"].map((item) => (
+              {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트", "정규식"].map((item) => (
                 <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>
                   {item}
                 </button>
@@ -281,7 +285,9 @@ export function SettingsCenter({
           ) : (
             <h3>로컬 서버</h3>
           )}
-          {section === "모델" && tab === "공용 프롬프트" ? (
+          {section === "모델" && tab === "정규식" ? (
+            <DisplayRules token={token} onSaved={onRulesSaved} />
+          ) : section === "모델" && tab === "공용 프롬프트" ? (
             <SharedPrompt token={token} session={session} />
           ) : section === "모델" && tab === "컨텍스트 제어" ? (
             session ? (

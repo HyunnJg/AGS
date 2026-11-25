@@ -58,3 +58,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 - `GET /api/sessions/{id}/sources`와 `PUT`은 세션별 수동 참고 자료 `{memory,retrieval,revision}`를 읽고 저장한다. 저장할 때 읽은 revision이 달라지면 409다. 각 자료는 최대 6,000자이다. 참고 자료는 user 역할로 전달하고, 완료 턴은 원래 역할로 전달한다.
 - 미리보기의 blocks는 messages와 같은 순서의 출처 목록이다. 고정 지침과 현재 입력의 예산을 먼저 확보하고 남은 예산을 설정 순서대로 사용한다. 빈 블록은 생략하며, excluded는 예산 때문에 일부 또는 전부 생략된 블록이다.
 - 모델 목록 GET에 `?refresh=1`을 붙이면 캐시 만료 전에도 공급자 목록을 다시 조회한다. 같은 공급자에 대한 동시 갱신은 하나의 요청을 공유한다.
+
+### 답변 표시 규칙
+
+인증된 `GET /api/settings/display-rules`는 작업실 공통 설정 `{revision,rules}`를 반환한다. 기본 규칙은 빈 배열이다. `PUT`으로 읽은 revision과 규칙 배열을 보내면 순서대로 저장하고 새 revision을 반환한다. 각 규칙은 `{id,name,enabled,pattern,flags,replacement}`로 구성한다. 문법 오류·중복 ID·개수 초과는 400, 동시 편집 충돌은 409다. 브라우저는 응답이 끝난 뒤 표시할 때만 치환한다.

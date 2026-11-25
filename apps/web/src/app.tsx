@@ -1,3 +1,5 @@
+import { ReplyText } from "./DisplayRules.tsx";
+import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { presets, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
@@ -84,6 +86,7 @@ function Conversation({
   update,
   activity,
   favorites,
+  displayRules,
   options,
   onRemoteActivity,
   text,
@@ -96,6 +99,7 @@ function Conversation({
   activity: (id: string, running: boolean) => void;
   visible: boolean;
   favorites: ModelSelection[];
+  displayRules: DisplayRule[];
   options: ProviderOption[];
   onRemoteActivity: (id: string, active: boolean) => void;
   text: string;
@@ -269,7 +273,7 @@ function Conversation({
                   {providerNames[t.provider]} {t.model}
                 </small>
               </div>
-              <div className="reply">{t.reply}</div>
+              <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />
               {statusLabels[t.status] && <small className="status">{statusLabels[t.status]}</small>}
             </article>
           ))}
@@ -344,11 +348,23 @@ function Workspace({ token }: { token: string }) {
   const [options, setOptions] = useState<ProviderOption[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
+  const [displayRules, setDisplayRules] = useState<DisplayRule[]>([]);
   const [favorites, setFavorites] = useState<ModelSelection[]>([]);
   useEffect(() => {
     if (settings) return;
     let alive = true;
     const reload = () => {
+      api(token, "/api/settings/display-rules")
+        .then((r) => r.json())
+        .then((data) => {
+          if (alive)
+            setDisplayRules((prev) =>
+              JSON.stringify(prev) === JSON.stringify(data.rules) ? prev : data.rules,
+            );
+        })
+        .catch((e) => {
+          if (alive) setError(problem(e));
+        });
       api(token, "/api/settings/favorites")
         .then((r) => r.json())
         .then((rows) => {
@@ -471,6 +487,7 @@ function Workspace({ token }: { token: string }) {
           streaming={running.includes(id) || Boolean(id && remoteId === id)}
           options={options}
           close={() => setSettings(false)}
+          onRulesSaved={setDisplayRules}
           save={applyModel}
         />
       )}
@@ -485,6 +502,7 @@ function Workspace({ token }: { token: string }) {
             text={drafts[current.id] ?? ""}
             setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
             onRemoteActivity={onRemoteActivity}
+            displayRules={displayRules}
             favorites={favorites}
             options={options}
             update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}

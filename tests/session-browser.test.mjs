@@ -169,6 +169,7 @@ test(
     await savedSources;
     await page.getByRole("button", { name: "전송 미리보기" }).click();
     await page.getByText(/포함된 대화 0턴/).waitFor();
+    await page.getByText(/사용자 역할 메시지가 연속됩니다/).waitFor();
     await page.getByText("현재 입력", { exact: true }).click();
     await page.locator("pre").filter({ hasText: "오래 걸리는 요청" }).waitFor();
     await page.getByRole("button", { name: "공급사 · 모델" }).click();
@@ -218,6 +219,68 @@ test(
     assert.match(await page.getByRole("listitem").first().innerText(), /ui\/test-model/);
     assert.ok(await page.locator("dialog").evaluate((el) => el.scrollWidth <= el.clientWidth));
     await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "정규식", exact: true }).click();
+    await page.getByRole("button", { name: "규칙 추가" }).click();
+    await page.getByLabel("이름", { exact: true }).fill("응답 머리말");
+    await page.getByLabel("패턴", { exact: true }).fill("수신한 (메시지)");
+    await page.getByLabel("치환문", { exact: true }).fill("새 $1");
+    await page.getByLabel("테스트 문장").fill("수신한 메시지");
+    await page
+      .getByLabel("치환 결과")
+      .filter({ hasText: /^새 메시지$/ })
+      .waitFor();
+    const savedRules = page.waitForResponse(
+      (r) => r.url().endsWith("/display-rules") && r.request().method() === "PUT" && r.ok(),
+    );
+    await page.getByRole("button", { name: "규칙 저장" }).click();
+    await savedRules;
+    await page.keyboard.press("Escape");
+    const original = "[mock · coding] 수신한 메시지: 첫 작업";
+    const displayed = "[mock · coding] 새 메시지: 첫 작업";
+    await page.getByText(displayed, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "원문 보기" }).click();
+    await page.getByText(original, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "치환 결과 보기" }).click();
+    await page.getByText(displayed, { exact: true }).waitFor();
+    await stop();
+    await start(new URL(base).port);
+    await page.reload();
+    await page.getByText(displayed, { exact: true }).waitFor();
+    const id = await page.evaluate(() => sessionStorage.getItem("ags-session"));
+    const preview = await page.request.post(base + "/api/sessions/" + id + "/context-preview", {
+      headers: { authorization: "Bearer " + token },
+      data: {
+        message: "원문 확인",
+        limits: { turns: 1, inputBudget: null, outputBudget: null },
+      },
+    });
+    assert.equal(preview.status(), 200);
+    assert.ok((await preview.json()).messages.some((m) => m.role === "assistant" && m.content === original));
+    // A worker that announces readiness but never answers exercises the deadline deterministically.
+    await page.addInitScript(() => {
+      window.Worker = class extends EventTarget {
+        constructor() {
+          super();
+          setTimeout(() => this.onmessage?.({ data: { ready: true } }), 0);
+        }
+        postMessage() {}
+        terminate() {}
+      };
+    });
+    await page.reload();
+    await page.getByText(/실행 시간을 초과했습니다/).first().waitFor();
+    await page.getByText(original, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "정규식", exact: true }).click();
+    await page.getByLabel("사용", { exact: true }).uncheck();
+    const disabledRule = page.waitForResponse(
+      (r) => r.url().endsWith("/display-rules") && r.request().method() === "PUT" && r.ok(),
+    );
+    await page.getByRole("button", { name: "규칙 저장" }).click();
+    await disabledRule;
+    await page.keyboard.press("Escape");
+    await page.getByText(original, { exact: true }).waitFor();
     assert.deepEqual(pageErrors, []);
   },
 );

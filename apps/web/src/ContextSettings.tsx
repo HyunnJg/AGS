@@ -138,6 +138,17 @@ export function ContextSettings({
               예산으로 일부 또는 전체 제외 · {preview.excluded.map((b) => blockNames[b]).join(", ")}
             </small>
           )}
+          {preview.messages.at(-1)?.role === "assistant" && (
+            <small>
+              마지막 메시지는 이전 모델 응답입니다. 사용자 메시지로 끝내려면 ‘현재 입력’을 마지막에
+              배치하세요.
+            </small>
+          )}
+          {preview.messages.some((m, i) => m.role === "user" && preview.messages[i - 1]?.role === "user") && (
+            <small>
+              사용자 역할 메시지가 연속됩니다. 역할 교대를 요구하는 공급자에서는 이 순서를 확인하세요.
+            </small>
+          )}
           {preview.messages.map((m, i) => (
             <details key={`${m.role}-${i}`}>
               <summary>

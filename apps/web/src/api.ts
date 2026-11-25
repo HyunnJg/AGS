@@ -24,7 +24,10 @@ export async function api(token: string, path: string, method = "GET", value?: u
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",
       );
-    if (res.status === 409 && (path === "/api/settings/prompt" || path.endsWith("/sources")))
+    if (
+      res.status === 409 &&
+      (path === "/api/settings/prompt" || path.endsWith("/sources") || path === "/api/settings/display-rules")
+    )
       throw new SettingsConflict();
     if (res.status === 409) throw new Error("이 대화에서 응답이 진행 중입니다.");
     throw new Error(`요청을 완료하지 못했습니다 (HTTP ${res.status}).`);
