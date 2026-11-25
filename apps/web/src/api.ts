@@ -1,3 +1,8 @@
+export class SettingsConflict extends Error {
+  constructor() {
+    super("다른 창에서 설정이 바뀌었습니다. 최신 내용과 비교해 주세요.");
+  }
+}
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 export async function api(token: string, path: string, method = "GET", value?: unknown) {
@@ -19,8 +24,8 @@ export async function api(token: string, path: string, method = "GET", value?: u
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",
       );
-    if (res.status === 409 && path === "/api/settings/prompt")
-      throw new Error("다른 창에서 공용 지침을 변경했습니다. 탭을 다시 열어 최신 값을 확인하세요.");
+    if (res.status === 409 && (path === "/api/settings/prompt" || path.endsWith("/sources")))
+      throw new SettingsConflict();
     if (res.status === 409) throw new Error("이 대화에서 응답이 진행 중입니다.");
     throw new Error(`요청을 완료하지 못했습니다 (HTTP ${res.status}).`);
   }

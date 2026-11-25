@@ -1,3 +1,10 @@
+import {
+  defaultOrder,
+  emptySources,
+  type Block,
+  type SessionSources,
+  type PromptSettings,
+} from "../../../packages/contracts/src/context.ts";
 import { defaultLimits, type ContextLimits } from "../../../packages/contracts/src/context.ts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -27,7 +34,9 @@ export class SessionStore {
         );
         CREATE TABLE IF NOT EXISTS context_limits (session_id TEXT PRIMARY KEY REFERENCES sessions(id), turns INTEGER NOT NULL, inputBudget INTEGER, outputBudget INTEGER);
         CREATE TABLE IF NOT EXISTS shared_prompt (id INTEGER PRIMARY KEY CHECK(id=1), prompt TEXT NOT NULL);
-        INSERT OR IGNORE INTO shared_prompt VALUES(1,'');
+        INSERT OR IGNORE INTO shared_prompt(id,prompt) VALUES(1,'');
+        CREATE TABLE IF NOT EXISTS prompt_layout(id INTEGER PRIMARY KEY CHECK(id=1),block_order TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS session_sources(session_id TEXT PRIMARY KEY REFERENCES sessions(id),memory TEXT NOT NULL,retrieval TEXT NOT NULL,revision INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS favorite_models (provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(provider,model));
         CREATE INDEX IF NOT EXISTS turns_by_session ON turns(session_id);
         CREATE UNIQUE INDEX IF NOT EXISTS one_active_turn ON turns(session_id) WHERE status='streaming';
@@ -95,6 +104,50 @@ export class SessionStore {
   }
   prompt(): string {
     return String(this.db.prepare("SELECT prompt FROM shared_prompt WHERE id=1").get()?.prompt ?? "");
+  }
+  promptSettings(): PromptSettings {
+    const row = this.db
+      .prepare("SELECT prompt,block_order FROM shared_prompt LEFT JOIN prompt_layout USING(id) WHERE id=1")
+      .get();
+    return {
+      prompt: String(row?.prompt ?? ""),
+      order: row?.block_order ? JSON.parse(String(row.block_order)) : defaultOrder,
+    };
+  }
+  setPromptSettings(value: PromptSettings, previous: string, previousOrder: Block[]) {
+    const current = this.promptSettings();
+    if (current.prompt !== previous || current.order.join() !== previousOrder.join()) return false;
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("UPDATE shared_prompt SET prompt=? WHERE id=1").run(value.prompt);
+      this.db
+        .prepare(
+          "INSERT INTO prompt_layout VALUES (1,?) ON CONFLICT(id) DO UPDATE SET block_order=excluded.block_order",
+        )
+        .run(JSON.stringify(value.order));
+      this.db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  sources(id: string): SessionSources {
+    return (
+      (this.db
+        .prepare("SELECT memory,retrieval,revision FROM session_sources WHERE session_id=?")
+        .get(id) as unknown as SessionSources) ?? emptySources
+    );
+  }
+  setSources(id: string, value: SessionSources) {
+    // The synchronous store owns this database exclusively.
+    if (this.sources(id).revision !== value.revision) return false;
+    this.db
+      .prepare(
+        "INSERT INTO session_sources VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET memory=excluded.memory,retrieval=excluded.retrieval,revision=excluded.revision",
+      )
+      .run(id, value.memory, value.retrieval, value.revision + 1);
+    return true;
   }
   setPrompt(prompt: string, previous: string) {
     return (

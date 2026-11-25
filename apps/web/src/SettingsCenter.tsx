@@ -1,4 +1,5 @@
-import { ContextSettings, SharedPrompt } from "./ContextSettings.tsx";
+import { SharedPrompt } from "./PromptLayout.tsx";
+import { ContextSettings } from "./ContextSettings.tsx";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -253,11 +254,20 @@ export function SettingsCenter({
       </header>
       <div className="settings-layout">
         <fieldset className="settings-rail" aria-label="설정 분류">
-          {["모델", "고급 기능"].map((item) => (
-            <button type="button" key={item} aria-pressed={section === item} onClick={() => setSection(item)}>
-              {item}
-            </button>
-          ))}
+          {["모델", "임베딩", "이미지", "TTS", "언어 지원", "고급 기능", "플러그인", "토글형 모듈"].map(
+            (item) => (
+              <button
+                type="button"
+                key={item}
+                disabled={item !== "모델" && item !== "고급 기능"}
+                title={item === "모델" || item === "고급 기능" ? undefined : "연결 예정"}
+                aria-pressed={section === item}
+                onClick={() => setSection(item)}
+              >
+                {item}
+              </button>
+            ),
+          )}
         </fieldset>
         <section className="settings-detail">
           {section === "모델" ? (

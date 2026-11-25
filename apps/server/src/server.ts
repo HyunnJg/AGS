@@ -1,3 +1,4 @@
+import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
 import { assembleContext } from "./context.ts";
 import { type ContextLimits, isLimits, maxPromptLength } from "../../../packages/contracts/src/context.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -72,13 +73,16 @@ export function createChatServer(
     message: string,
     limits: ContextLimits = db.limits(session.id),
   ) {
+    const shared = db.promptSettings();
     return assembleContext(
       session.preset,
-      db.prompt(),
+      shared.prompt,
       limits,
       db.history(session.id, limits.turns),
       message,
       providers.contextWindow(session.provider, session.model) ?? null,
+      shared.order,
+      db.sources(session.id),
     );
   }
 
@@ -122,7 +126,7 @@ export function createChatServer(
       }
     }
     if (path === "/api/settings/prompt" && store) {
-      if (req.method === "GET") return json({ prompt: store.prompt() });
+      if (req.method === "GET") return json(store.promptSettings());
       if (req.method !== "PUT") return allow("GET, PUT");
       const body = await readBody(req);
       if (
@@ -135,8 +139,25 @@ export function createChatServer(
         typeof body.previous !== "string"
       )
         throw new RequestError(400, "invalid_prompt");
-      if (!store.setPrompt(body.prompt, body.previous)) throw new RequestError(409, "settings_changed");
-      return json({ prompt: store.prompt() });
+      if ("order" in body || "previousOrder" in body) {
+        if (
+          !("order" in body) ||
+          !isBlockOrder(body.order) ||
+          !("previousOrder" in body) ||
+          !isBlockOrder(body.previousOrder)
+        )
+          throw new RequestError(400, "invalid_order");
+        if (
+          !store.setPromptSettings(
+            { prompt: body.prompt, order: body.order },
+            body.previous,
+            body.previousOrder,
+          )
+        )
+          throw new RequestError(409, "settings_changed");
+      } else if (!store.setPrompt(body.prompt, body.previous))
+        throw new RequestError(409, "settings_changed");
+      return json(store.promptSettings());
     }
     if (path === "/api/settings/runtime") {
       if (req.method !== "GET") return allow("GET");
@@ -174,9 +195,40 @@ export function createChatServer(
       }
       return allow("GET, POST");
     }
-    const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview)?$/.exec(path);
+    const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/sources)?$/.exec(
+      path,
+    );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/sources") {
+      if (req.method === "GET") return json(store.sources(session.id));
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const data = await readBody(req);
+      if (
+        !data ||
+        typeof data !== "object" ||
+        !("memory" in data) ||
+        typeof data.memory !== "string" ||
+        data.memory.length > maxSourceLength ||
+        !("retrieval" in data) ||
+        typeof data.retrieval !== "string" ||
+        data.retrieval.length > maxSourceLength ||
+        !("revision" in data) ||
+        typeof data.revision !== "number" ||
+        !Number.isSafeInteger(data.revision) ||
+        data.revision < 0
+      )
+        throw new RequestError(400, "invalid_sources");
+      if (
+        !store.setSources(session.id, {
+          memory: data.memory,
+          retrieval: data.retrieval,
+          revision: data.revision,
+        })
+      )
+        throw new RequestError(409, "settings_changed");
+      return json(store.sources(session.id));
+    }
     if (session && store && route?.[2] === "/context") {
       if (req.method === "GET") return json(store.limits(session.id));
       if (req.method !== "PUT") return allow("GET, PUT");

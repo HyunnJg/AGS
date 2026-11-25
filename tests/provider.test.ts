@@ -110,13 +110,46 @@ test(
       (await call("/api/settings/prompt", "PUT", { prompt: "오래된 편집", previous: "" })).status,
       409,
     );
+    const sourceData = { memory: "유지할 메모", retrieval: "검토 자료", revision: 0 };
+    assert.equal((await call(`${path}/sources`, "PUT", sourceData)).status, 200);
+    assert.equal((await call(`${path}/sources`, "PUT", sourceData)).status, 409);
+    const currentPrompt = await (await call("/api/settings/prompt", "GET")).json();
+    const newOrder = ["input", "retrieval", "history", "memory"];
+    assert.equal(
+      (
+        await call("/api/settings/prompt", "PUT", {
+          prompt: currentPrompt.prompt,
+          previous: currentPrompt.prompt,
+          previousOrder: currentPrompt.order,
+          order: ["input", "input", "history", "memory"],
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await call("/api/settings/prompt", "PUT", {
+          prompt: currentPrompt.prompt,
+          previous: currentPrompt.prompt,
+          previousOrder: currentPrompt.order,
+          order: newOrder,
+        })
+      ).status,
+      200,
+    );
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
     assert.equal(preview.includedTurns, 1);
     assert.deepEqual(
       preview.messages.slice(1).map((m: { content: string }) => m.content),
-      ["next", "한글", "다음"],
+      [
+        "다음",
+        "검색·임베딩 자료 (참고 자료)\n검토 자료",
+        "next",
+        "한글",
+        "장기기억 (참고 자료)\n유지할 메모",
+      ],
     );
     assert.match(preview.messages[0].content, /한글로 작성/);
     assert.match(await (await send("다음")).text(), /event: done/);

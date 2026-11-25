@@ -259,14 +259,6 @@ header h2 {
 .actions button {
   font-size: 0.84rem;
 }
-.dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #548465;
-  margin-right: 3px;
-}
 .login {
   min-height: 100dvh;
   padding: 20px;
@@ -346,14 +338,6 @@ header h2 {
 
 .conversation[hidden] {
   display: none;
-}
-.model-label {
-  margin-left: auto;
-  max-width: min(35vw, 320px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.82rem;
 }
 .settings-launcher {
   margin-top: auto;
@@ -597,4 +581,50 @@ header h2 {
   font: inherit;
   max-height: 20dvh;
   overflow: auto;
+}
+.quick-model {
+  font: inherit;
+  font-size: 0.84rem;
+  max-width: min(72%, 360px);
+  color: #284937;
+  border: 1px solid #cbd8cc;
+  background: #f5f8f2;
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+.block-order {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+.block-order li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: #eef3eb;
+  border-radius: 5px;
+}
+.block-order li span {
+  margin-right: auto;
+}
+.block-order button {
+  font-size: 0.82rem;
+  padding: 2px 8px;
+}
+.source-fields {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+@media (max-width: 680px) {
+  .settings-rail {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .settings-rail button {
+    flex: none;
+  }
 }

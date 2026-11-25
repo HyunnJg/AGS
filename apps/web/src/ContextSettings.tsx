@@ -1,11 +1,11 @@
+import { SourceEditor } from "./PromptLayout.tsx";
 import { useState, useEffect } from "react";
 import {
   defaultLimits,
   isLimits,
   maxBudget,
   maxTurns,
-  maxPromptLength,
-  systemText,
+  blockNames,
   type ContextLimits,
   type ContextPreview,
 } from "../../../packages/contracts/src/context.ts";
@@ -105,8 +105,10 @@ export function ContextSettings({
         ))}
       </fieldset>
       <small>
-        입력은 UTF-8 바이트 수와 메시지 여유분으로 추정합니다. 예산을 넘으면 오래된 턴부터 제외합니다.
+        한글 한 글자는 보통 3바이트로 계산합니다. 입력은 UTF-8 바이트 수와 메시지 여유분으로 추정합니다.
+        예산을 넘으면 오래된 턴부터 제외합니다.
       </small>
+      <SourceEditor token={token} id={session.id} onSaved={() => setPreview(undefined)} />
       <footer>
         <button type="button" disabled={!valid || busy} onClick={() => void run("preview")}>
           전송 미리보기
@@ -131,94 +133,27 @@ export function ContextSettings({
           )}
           {!preview.fits && <p role="alert">지침과 현재 메시지가 남은 입력 예산을 넘습니다.</p>}
           {session.provider === "mock" && <small>로컬 mock은 외부로 전송하지 않습니다.</small>}
+          {!!preview.excluded.length && (
+            <small>
+              예산으로 일부 또는 전체 제외 · {preview.excluded.map((b) => blockNames[b]).join(", ")}
+            </small>
+          )}
           {preview.messages.map((m, i) => (
             <details key={`${m.role}-${i}`}>
               <summary>
-                {m.role === "system"
+                {preview.blocks[i] === "system"
                   ? "시스템 · 공용 지침 · 프리셋"
-                  : i === preview.messages.length - 1
-                    ? "현재 메시지"
-                    : m.role === "user"
+                  : preview.blocks[i] === "history"
+                    ? m.role === "user"
                       ? "이전 요청"
-                      : "이전 응답"}
+                      : "이전 응답"
+                    : blockNames[preview.blocks[i] as keyof typeof blockNames]}
               </summary>
               <pre>{m.content || "(비어 있음)"}</pre>
             </details>
           ))}
         </div>
       )}
-    </form>
-  );
-}
-
-export function SharedPrompt({ token, session }: { token: string; session?: Session }) {
-  const [stored, setStored] = useState<string>();
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let alive = true;
-    api(token, "/api/settings/prompt")
-      .then((r) => r.json())
-      .then((data) => {
-        if (alive) {
-          setStored(data.prompt);
-          setPrompt(data.prompt);
-        }
-      })
-      .catch((e) => {
-        if (alive) setError(problem(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [token]);
-  async function save() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await (
-        await api(token, "/api/settings/prompt", "PUT", { prompt, previous: stored })
-      ).json();
-      setStored(result.prompt);
-    } catch (e) {
-      setError(problem(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
-    >
-      <label>
-        모든 대화의 공용 지침
-        <textarea
-          rows={6}
-          maxLength={maxPromptLength}
-          disabled={stored === undefined || busy}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-      </label>
-      <small>저장한 지침은 모든 대화의 다음 요청부터 적용됩니다.</small>
-      <details className="context-preview">
-        <summary>지침 결합 미리보기</summary>
-        <pre>{systemText(prompt, session?.preset ?? "general")}</pre>
-      </details>
-      {error && <p role="alert">{error}</p>}
-      <footer>
-        <button
-          type="submit"
-          className="primary"
-          disabled={busy || stored === undefined || stored === prompt}
-        >
-          저장
-        </button>
-      </footer>
     </form>
   );
 }

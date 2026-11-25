@@ -34,7 +34,9 @@ export const presetsText: Record<Preset, string> = {
 };
 export function systemText(prompt: string, preset: Preset) {
   const parts = [systemPolicy];
-  if (prompt.trim()) parts.push(`사용자의 공용 지침: ${JSON.stringify(prompt.trim())}`);
+  if (prompt.trim())
+    parts.push(`공용 지침
+${prompt}`);
   parts.push(`분야 프리셋: ${presetsText[preset]}`);
   return parts.join("\n\n");
 }
@@ -44,9 +46,39 @@ export interface Message {
 }
 export interface ContextPreview {
   messages: Message[];
+  blocks: ("system" | Block)[];
+  excluded: Block[];
   includedTurns: number;
   estimatedInput: number;
   modelWindow: number | null;
   fits: boolean;
   outputBudget: number | null;
 }
+
+export const blockNames = {
+  memory: "장기기억",
+  history: "직전 대화",
+  retrieval: "검색·임베딩 자료",
+  input: "현재 입력",
+} as const;
+export type Block = keyof typeof blockNames;
+export const defaultOrder: Block[] = ["memory", "history", "retrieval", "input"];
+export function isBlockOrder(value: unknown): value is Block[] {
+  return (
+    Array.isArray(value) &&
+    value.length === defaultOrder.length &&
+    new Set(value).size === value.length &&
+    value.every((key) => typeof key === "string" && Object.hasOwn(blockNames, key))
+  );
+}
+export interface PromptSettings {
+  prompt: string;
+  order: Block[];
+}
+export interface SessionSources {
+  memory: string;
+  retrieval: string;
+  revision: number;
+}
+export const emptySources: SessionSources = { memory: "", retrieval: "", revision: 0 };
+export const maxSourceLength = 6000;
