@@ -10,9 +10,14 @@ export function* mockReply(prompt: string): Generator<string> {
   yield message;
 }
 
-export async function* streamMock(prompt: string, signal: AbortSignal) {
-  for (const text of mockReply(prompt)) {
+export async function* streamMock(prompt: string, signal: AbortSignal, preset?: string) {
+  const [label = "", message = ""] = [...mockReply(prompt)];
+  await delay(80, undefined, { signal });
+  yield preset && preset !== "general" ? `[mock · ${preset}] 수신한 메시지: ` : label;
+  const chars = Array.from(message);
+  const chunkSize = preset ? Math.max(48, Math.ceil(chars.length / 100)) : chars.length || 1;
+  for (let offset = 0; offset < chars.length; offset += chunkSize) {
     await delay(80, undefined, { signal });
-    yield text;
+    yield chars.slice(offset, offset + chunkSize).join("");
   }
 }
