@@ -6,7 +6,7 @@ jobs:
   verify:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -17,3 +17,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
       - run: pnpm start "CI smoke"
+      - run: pnpm exec playwright install chromium --only-shell
+      - run: pnpm run test:e2e
+      - name: Stage and test Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP "AGS-Windows"
+          New-Item -ItemType Directory "$package/scripts" -Force | Out-Null
+          Copy-Item dist -Destination $package -Recurse
+          Copy-Item Start-AGS.cmd,README.md -Destination $package
+          Copy-Item scripts/open-windows.mjs -Destination "$package/scripts"
+          '{"type":"module"}' | Set-Content "$package/package.json" -Encoding utf8
+          New-Item -ItemType Directory "$package/licenses" -Force | Out-Null
+          Copy-Item apps/web/node_modules/react/LICENSE "$package/licenses/react.txt"
+          Copy-Item apps/web/node_modules/react-dom/LICENSE "$package/licenses/react-dom.txt"
+          $scheduler = Get-ChildItem "node_modules/.pnpm/scheduler@*/node_modules/scheduler/LICENSE" | Select-Object -First 1
+          Copy-Item $scheduler.FullName "$package/licenses/scheduler.txt"
+          $env:AGS_PORT = "0"
+          $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-package-test"
+          & "$package/Start-AGS.cmd" --check
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: AGS-Windows
+          path: ${{ runner.temp }}/AGS-Windows/
+          if-no-files-found: error

@@ -4,19 +4,26 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
-  "engines": { "node": ">=24.22.3 <25" },
+  "engines": {
+    "node": ">=24.22.3 <25"
+  },
   "scripts": {
     "dev": "node scripts/mock.ts",
-    "lint": "biome lint scripts tests packages",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test tests/mock.test.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "server": "node apps/server/src/main.ts",
+    "server:start": "node dist/apps/server/src/main.js",
+    "lint": "biome lint apps scripts tests packages",
+    "typecheck": "tsc --noEmit && tsc -p apps/web/tsconfig.json",
+    "test": "node --test tests/*.test.ts",
+    "build": "tsc -p tsconfig.build.json && pnpm --filter @ags/web build",
     "start": "node dist/scripts/mock.js",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
+    "test:built": "node --test tests/server-entry.test.mjs",
+    "check": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run test:built",
+    "test:e2e": "node --test tests/session-browser.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
     "@types/node": "24.10.1",
+    "playwright": "1.58.2",
     "typescript": "5.9.3"
   }
 }
