@@ -1,3 +1,4 @@
+import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -239,7 +240,10 @@ function Conversation({
   return (
     <section className="conversation" hidden={!visible}>
       <header>
-        <h2>{session.title}</h2>
+        <div className="conversation-title">
+          {session.sectionLabel && <small>{session.sectionLabel}</small>}
+          <h2>{session.title}</h2>
+        </div>
         <label className="preset">
           프리셋{" "}
           <select
@@ -347,6 +351,7 @@ function Workspace({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [projectsOpen, setProjectsOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [displayRules, setDisplayRules] = useState<DisplayRule[]>([]);
   const [favorites, setFavorites] = useState<ModelSelection[]>([]);
@@ -453,6 +458,14 @@ function Workspace({ token }: { token: string }) {
         <button type="button" className="new" disabled={locked || !ready} onClick={() => void create()}>
           ＋ 새 대화
         </button>
+        <button
+          type="button"
+          className="project-launcher"
+          disabled={!ready}
+          onClick={() => setProjectsOpen(true)}
+        >
+          프로젝트 · 파일
+        </button>
         <h2 className="nav-label">대화 목록</h2>
         <nav aria-label="대화 목록">
           {sessions.map((s) => (
@@ -478,6 +491,19 @@ function Workspace({ token }: { token: string }) {
           설정
         </button>
       </aside>
+      {projectsOpen && (
+        <ProjectWorkspace
+          token={token}
+          current={currentSession}
+          sessions={sessions}
+          close={() => setProjectsOpen(false)}
+          openSession={(s) => {
+            setSessions((prev) => (prev.some((item) => item.id === s.id) ? prev : [s, ...prev]));
+            select(s.id);
+            setProjectsOpen(false);
+          }}
+        />
+      )}
       {settings && (
         <SettingsCenter
           token={token}

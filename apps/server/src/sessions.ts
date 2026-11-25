@@ -1,3 +1,5 @@
+import type { Project, Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
+import type { RegisteredRoot } from "./workspace-files.ts";
 import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
 import {
   defaultOrder,
@@ -11,6 +13,10 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
 import type { Preset, Session, Turn } from "../../../packages/contracts/src/sessions.ts";
+
+const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
+  FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
+  LEFT JOIN projects ON sections.projectId=projects.id`;
 
 export class SessionStore {
   private db: DatabaseSync;
@@ -28,6 +34,8 @@ export class SessionStore {
         CREATE TABLE IF NOT EXISTS sessions (
           id TEXT PRIMARY KEY, title TEXT NOT NULL, preset TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,root TEXT,identity TEXT);
+        CREATE TABLE IF NOT EXISTS sections(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS turns (
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
@@ -53,6 +61,11 @@ export class SessionStore {
         }
         this.db.exec("PRAGMA user_version=1");
       }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 1) {
+        this.db.exec(
+          "ALTER TABLE sessions ADD COLUMN sectionId TEXT REFERENCES sections(id); PRAGMA user_version=2",
+        );
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.close();
@@ -60,6 +73,49 @@ export class SessionStore {
     }
   }
 
+  catalog(): WorkspaceCatalog {
+    return {
+      projects: this.db
+        .prepare("SELECT id,name,root FROM projects ORDER BY rowid")
+        .all() as unknown as Project[],
+      sections: this.db
+        .prepare("SELECT id,projectId,name FROM sections ORDER BY rowid")
+        .all() as unknown as Section[],
+    };
+  }
+  addProject(name: string) {
+    const id = randomUUID();
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("INSERT INTO projects(id,name) VALUES(?,?)").run(id, name);
+      this.addSection(id, "일반");
+      this.db.exec("COMMIT");
+      return id;
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+  addSection(projectId: string, name: string) {
+    const id = randomUUID();
+    this.db.prepare("INSERT INTO sections VALUES(?,?,?)").run(id, projectId, name);
+    return id;
+  }
+  project(id: string) {
+    return this.db.prepare("SELECT root,identity FROM projects WHERE id=?").get(id) as
+      | { root: string | null; identity: string | null }
+      | undefined;
+  }
+  sectionExists(id: string) {
+    return !!this.db.prepare("SELECT 1 FROM sections WHERE id=?").get(id);
+  }
+  linkRoot(id: string, previous: string | null, root: RegisteredRoot | null) {
+    return (
+      this.db
+        .prepare("UPDATE projects SET root=?,identity=? WHERE id=? AND root IS ?")
+        .run(root?.path ?? null, root?.identity ?? null, id, previous).changes === 1
+    );
+  }
   displaySettings(): DisplaySettings {
     const row = this.db.prepare("SELECT revision,rules FROM display_settings WHERE id=1").get();
     return { revision: Number(row?.revision), rules: JSON.parse(String(row?.rules)) };
@@ -83,17 +139,24 @@ export class SessionStore {
     this.db.prepare(sql).run(provider, model);
   }
   list() {
-    return this.db.prepare("SELECT * FROM sessions ORDER BY rowid DESC").all() as unknown as Session[];
+    return this.db.prepare(`${sessionQuery} ORDER BY sessions.rowid DESC`).all() as unknown as Session[];
   }
-  create(selection: ModelSelection = { provider: "mock", model: "" }) {
-    const session: Session = { id: randomUUID(), title: "새 대화", preset: "general", ...selection };
+  create(selection: ModelSelection = { provider: "mock", model: "" }, sectionId: string | null = null) {
+    const session: Session = {
+      id: randomUUID(),
+      title: "새 대화",
+      preset: "general",
+      provider: selection.provider,
+      model: selection.model,
+      sectionId,
+    };
     this.db
-      .prepare("INSERT INTO sessions(id,title,preset,provider,model) VALUES (?, ?, ?, ?, ?)")
-      .run(session.id, session.title, session.preset, session.provider, session.model);
-    return session;
+      .prepare("INSERT INTO sessions(id,title,preset,provider,model,sectionId) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(session.id, session.title, session.preset, session.provider, session.model, sectionId);
+    return this.get(session.id) ?? session;
   }
   get(id: string) {
-    return this.db.prepare("SELECT * FROM sessions WHERE id=?").get(id) as unknown as Session | undefined;
+    return this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id) as unknown as Session | undefined;
   }
   turns(id: string) {
     return this.db
