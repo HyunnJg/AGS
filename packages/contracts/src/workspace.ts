@@ -36,3 +36,14 @@ export interface WorkspaceSearch {
   skipped: number;
   limited: boolean;
 }
+
+export type FileAction = "entries" | "file" | "search";
+export interface FileActivity {
+  id: number;
+  time: number;
+  action: FileAction;
+  path: string | null;
+  start: number | null;
+  end: number | null;
+  error: string | null;
+}

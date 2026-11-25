@@ -288,6 +288,7 @@ test(
     t.after(() => rm(folder, { recursive: true, force: true }));
     const notes = Array.from({ length: 82 }, (_, i) => `근거 ${i + 1}`).join("\n");
     await writeFile(join(folder, "INDEX.md"), notes);
+    await writeFile(join(folder, "tags.txt"), "TokenLookup");
     const openWorkspace = () => page.getByRole("button", { name: "프로젝트 · 파일" }).click();
     await openWorkspace();
     await page.getByLabel("프로젝트 이름").fill("역사 자료");
@@ -317,6 +318,9 @@ test(
     await page.getByText("파일 내용 검색", { exact: true }).click();
     await page.getByRole("button", { name: /INDEX.md · 82줄/ }).click();
     await page.getByText(/검색 후 원본이 변경됐습니다/).waitFor();
+    await page.getByRole("button", { name: "최신 파일 1줄부터 열기" }).click();
+    await page.getByText("1–80 / 83줄").waitFor();
+    assert.ok((await page.locator(".file-browser pre").innerText()).startsWith("추가한 첫 줄"));
     await page.getByText("파일 내용 검색", { exact: true }).click();
     await page.getByRole("button", { name: "검색", exact: true }).click();
     await page.getByRole("button", { name: /INDEX.md · 83줄/ }).click();
@@ -341,6 +345,45 @@ test(
     const projectId = await page.getByLabel("프로젝트 선택").inputValue();
     const projectPath = `${base}/api/projects/${projectId}`;
     const headers = { authorization: `Bearer ${token}` };
+    // Resize the open mobile dialog and edit a chat draft with the desktop panel still open.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForFunction(() =>
+      document.querySelector("#project-workspace")?.matches("[open]:not(:modal)"),
+    );
+    const panel = page.getByRole("dialog", { name: "프로젝트 · 파일" });
+    const chat = page.getByLabel("메시지");
+    await panel.getByRole("button", { name: "INDEX.md", exact: true }).click();
+    await panel.getByText("1–80 / 83줄").waitFor();
+    await chat.fill("옆에서 자료 확인");
+    await page.getByRole("button", { name: /^전송/ }).click();
+    await page.getByText("[mock] 수신한 메시지: 옆에서 자료 확인", { exact: true }).waitFor();
+    assert.ok((await panel.locator("pre").innerText()).startsWith("추가한 첫 줄"));
+    await chat.fill("보존할 대화 초안");
+    const panelBox = await panel.boundingBox(),
+      chatBox = await chat.boundingBox();
+    assert.ok(panelBox && chatBox && panelBox.x >= chatBox.x + chatBox.width);
+    await panel.getByRole("button", { name: "활동 기록", exact: true }).click();
+    await panel.getByText("INDEX.md · 83–83줄", { exact: true }).waitFor();
+    const history = await (await page.request.get(`${projectPath}/activity`, { headers })).json();
+    assert.ok(history.some((r) => r.error === "search_result_changed"));
+    assert.ok(history.some((r) => r.action === "search" && r.error === null));
+    assert.ok(!JSON.stringify(history).includes("근거 82") && !JSON.stringify(history).includes(folder));
+    assert.equal((await page.request.get(`${projectPath}/activity`)).status(), 401);
+    await panel.getByRole("button", { name: "파일", exact: true }).click();
+    await panel.getByText("파일 내용 검색", { exact: true }).click();
+    await panel.getByLabel("검색 문구").fill("tokenlookup");
+    const searchRequest = page.waitForRequest((r) => r.url().endsWith("/search"));
+    await panel.getByRole("button", { name: "검색", exact: true }).click();
+    assert.equal((await searchRequest).postDataJSON().caseSensitive, false);
+    await panel.getByRole("button", { name: /tags.txt · 1줄/ }).waitFor();
+    await panel.getByLabel("대소문자 구분").check();
+    await panel.getByRole("button", { name: "검색", exact: true }).click();
+    await panel.getByText(/일치한 줄 0개/).waitFor();
+    await panel.getByRole("button", { name: "작업공간 닫기" }).click();
+    assert.equal(await chat.inputValue(), "보존할 대화 초안");
+    await openWorkspace();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => document.querySelector("#project-workspace")?.matches(":modal"));
     const noToken = await page.request.post(`${projectPath}/entries`, { data: { path: "" } });
     assert.equal(noToken.status(), 401);
     const searchData = { path: "", query: "근거" };

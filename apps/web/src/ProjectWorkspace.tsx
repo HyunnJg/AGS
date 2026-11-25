@@ -1,3 +1,4 @@
+import { WorkspaceActivity } from "./WorkspaceActivity.tsx";
 import { WorkspaceSearch } from "./WorkspaceSearch.tsx";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
@@ -7,7 +8,7 @@ import type {
   WorkspaceCatalog,
 } from "../../../packages/contracts/src/workspace.ts";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
-import { api } from "./api.ts";
+import { api, SearchResultChanged } from "./api.ts";
 
 function message(e: unknown) {
   return e instanceof Error ? e.message : "작업공간을 열 수 없습니다.";
@@ -47,7 +48,13 @@ type View = { path: string; folder: boolean; position: number; version?: string;
 const top: View = { path: "", folder: true, position: 0 };
 function FileBrowser({ token, project }: { token: string; project: Project }) {
   const [view, setView] = useState(top);
-  const [data, setData] = useState<{ view: View; dir?: DirectoryPage; file?: FilePage; error?: string }>();
+  const [data, setData] = useState<{
+    view: View;
+    dir?: DirectoryPage;
+    file?: FilePage;
+    error?: string;
+    stale?: boolean;
+  }>();
   const [line, setLine] = useState("1");
   useEffect(() => {
     let current = true;
@@ -62,7 +69,7 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
         if (current) setData(view.folder ? { view, dir: result } : { view, file: result });
       })
       .catch((e) => {
-        if (current) setData({ view, error: message(e) });
+        if (current) setData({ view, error: message(e), stale: e instanceof SearchResultChanged });
       });
     return () => {
       current = false;
@@ -112,6 +119,11 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
       {result?.error && (
         <>
           <p role="alert">{result.error}</p>
+          {result.stale && (
+            <button type="button" onClick={() => enter(view.path, false)}>
+              최신 파일 1줄부터 열기
+            </button>
+          )}
           <button type="button" onClick={() => setView({ ...view })}>
             다시 읽기
           </button>
@@ -264,6 +276,7 @@ export function ProjectWorkspace({
   openSession: (session: Session) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [activity, setActivity] = useState(false);
   const [catalog, setCatalog] = useState<WorkspaceCatalog>();
   const [projectId, setProject] = useState(""),
     [sectionId, setSection] = useState("");
@@ -272,8 +285,19 @@ export function ProjectWorkspace({
   const route = "/api/projects";
   useEffect(() => {
     const el = dialog.current;
-    el?.showModal();
-    return () => el?.close();
+    if (!el) return;
+    const media = window.matchMedia("(min-width: 1000px)");
+    const layout = () => {
+      if (el.open) el.close();
+      if (media.matches) el.show();
+      else el.showModal();
+    };
+    layout();
+    media.addEventListener("change", layout);
+    return () => {
+      media.removeEventListener("change", layout);
+      el.close();
+    };
   }, []);
   useEffect(() => {
     let alive = true;
@@ -321,10 +345,17 @@ export function ProjectWorkspace({
   }
   return (
     <dialog
+      id="project-workspace"
       ref={dialog}
       className="settings-center project-workspace"
       aria-labelledby="workspace-heading"
       onCancel={close}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !dialog.current?.matches(":modal")) {
+          e.preventDefault();
+          close();
+        }
+      }}
     >
       <header>
         <h2 id="workspace-heading">프로젝트 · 파일</h2>
@@ -401,7 +432,18 @@ export function ProjectWorkspace({
                   </button>
                 ))}
             </div>
-            <ProjectFolder key={project.root ?? ""} token={token} project={project} refresh={refresh} />
+            <fieldset className="workspace-views" aria-label="작업공간 보기">
+              <button type="button" aria-pressed={!activity} onClick={() => setActivity(false)}>
+                파일
+              </button>
+              <button type="button" aria-pressed={activity} onClick={() => setActivity(true)}>
+                활동 기록
+              </button>
+            </fieldset>
+            <div hidden={activity}>
+              <ProjectFolder key={project.root ?? ""} token={token} project={project} refresh={refresh} />
+            </div>
+            {activity && <WorkspaceActivity token={token} project={project.id} />}
           </section>
         )}
       </div>

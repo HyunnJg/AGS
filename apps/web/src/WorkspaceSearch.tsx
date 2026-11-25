@@ -18,6 +18,7 @@ export function WorkspaceSearch({
   open: (hit: SearchHit) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
   const [scope, setScope] = useState("");
   const [result, setResult] = useState<SearchData>();
   const [error, setError] = useState("");
@@ -43,7 +44,7 @@ export function WorkspaceSearch({
         token,
         `/api/projects/${project.id}/search`,
         "POST",
-        { path: scope, root: project.root, query },
+        { path: scope, root: project.root, query, caseSensitive },
         controller.signal,
       );
       const data: SearchData = await response.json();
@@ -90,6 +91,17 @@ export function WorkspaceSearch({
             </select>
           </label>
         )}
+        <label className="match-case">
+          <input
+            type="checkbox"
+            checked={caseSensitive}
+            onChange={(e) => {
+              reset();
+              setCaseSensitive(e.target.checked);
+            }}
+          />
+          대소문자 구분
+        </label>
         <button type="submit" disabled={busy || !query.trim()}>
           검색
         </button>

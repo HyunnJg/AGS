@@ -101,3 +101,20 @@ test("작업 폴더 검색은 원본 줄과 버전을 반환하고 제외 폴더
     /folder_changed/,
   );
 });
+
+test("대소문자 옵션은 유니코드와 문장 부호를 원문 위치 그대로 찾는다", async (t) => {
+  const base = await mkdtemp(join(tmpdir(), "ags-case-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = await registerFolder(base, "");
+  await writeFile(join(base, "note.txt"), "원문 [Key].\n두 번째 [KEY].\nkeyX");
+  const literal = "[key].";
+  const insensitive = await searchWorkspace(root, "", literal, () => {}, false);
+  assert.deepEqual(
+    insensitive.hits.map((h) => [h.line, h.excerpt]),
+    [
+      [1, "원문 [Key]."],
+      [2, "두 번째 [KEY]."],
+    ],
+  );
+  assert.equal((await searchWorkspace(root, "", literal, () => {})).hits.length, 0);
+});

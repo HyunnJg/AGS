@@ -45,3 +45,25 @@ test("중복 활성 턴을 막고 비정상 종료된 턴의 부분 텍스트와
     second.close();
   }
 });
+
+test("프로젝트별 최신 파일 활동 100건을 재시작 뒤에도 유지한다", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-activity-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "sessions.sqlite"),
+    db = new SessionStore(path);
+  const a = db.addProject("첫 프로젝트"),
+    b = db.addProject("다른 프로젝트");
+  db.recordFileActivity(b, "search", "", null);
+  for (let i = 1; i <= 105; i++) db.recordFileActivity(a, "file", "notes.md", null, i, i);
+  db.close();
+  const reopened = new SessionStore(path);
+  try {
+    const rows = reopened.fileActivity(a);
+    assert.equal(rows.length, 100);
+    assert.equal(rows[0]?.start, 105);
+    assert.equal(rows.at(-1)?.start, 6);
+    assert.equal(reopened.fileActivity(b).length, 1);
+  } finally {
+    reopened.close();
+  }
+});
