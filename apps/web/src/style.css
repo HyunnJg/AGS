@@ -343,3 +343,11 @@ header h2 {
     min-height: 30vh;
   }
 }
+
+.conversation[hidden] { display: none; }
+.model-picker { position: relative; min-width: 0; margin-left: auto; }
+.model-label { max-width: min(35vw, 320px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; }
+.model-form { position: absolute; z-index: 2; top: 110%; right: 0; width: min(280px, 85vw); background: white; border: 1px solid #cbd3c7; border-radius: 10px; box-shadow: 0 6px 24px #233c2722; padding: 14px; display: grid; gap: 10px; }
+.model-form label { display: grid; gap: 3px; font-size: .82rem; }
+.model-form input,.model-form select { width: 100%; padding: 6px; border: 1px solid #bac6bc; border-radius: 5px; }
+@media(max-width:680px) { .model-form { position: fixed; left: 14px; right: 14px; top: auto; width: auto; margin-top: 6px; } }

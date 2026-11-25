@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { createRoot } from "react-dom/client";
 import { presets, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
+import {
+  providerNames,
+  type ProviderOption,
+  type ModelSelection,
+} from "../../../packages/contracts/src/providers.ts";
+import { ModelPicker } from "./ModelPicker.tsx";
 import "./style.css";
 
 function Mark() {
@@ -51,7 +57,10 @@ function Login({ enter }: { enter: (token: string) => void }) {
           value={token}
           onChange={(e) => setToken(e.target.value)}
         />
-        <small>서버를 시작할 때 설정한 AGS_LOCAL_TOKEN을 입력하세요.</small>
+        <small>
+          Windows 실행기로 시작했다면 Ctrl+V로 토큰을 붙여 넣으세요. 직접 시작했다면 설정한 AGS_LOCAL_TOKEN을
+          입력하세요.
+        </small>
         {error && <p role="alert">{error}</p>}
         <button type="submit" className="primary" disabled={busy}>
           작업실 열기
@@ -73,14 +82,16 @@ function Conversation({
   token,
   session,
   update,
-  lock,
-  locked,
+  activity,
+  options,
+  visible,
 }: {
   token: string;
   session: Session;
   update: (s: Session) => void;
-  lock: (v: boolean) => void;
-  locked: boolean;
+  activity: (id: string, running: boolean) => void;
+  visible: boolean;
+  options: ProviderOption[];
 }) {
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -114,15 +125,17 @@ function Conversation({
     };
   }, [path, token, remoteStreaming]);
   useEffect(() => {
-    if (turns.length) end.current?.scrollIntoView({ block: "nearest" });
-  }, [turns]);
+    if (visible && turns.length) end.current?.scrollIntoView({ block: "nearest" });
+  }, [turns, visible]);
 
-  async function changePreset(value: Preset) {
+  async function changeSettings(value: { preset: Preset } | ModelSelection) {
     setSavingPreset(true);
     try {
-      update(await (await api(token, path, "PATCH", { preset: value })).json());
+      update(await (await api(token, path, "PATCH", value)).json());
+      return true;
     } catch (e) {
       setError(problem(e));
+      return false;
     } finally {
       setSavingPreset(false);
     }
@@ -130,10 +143,10 @@ function Conversation({
   async function send(e: FormEvent) {
     e.preventDefault();
     const message = text.trim();
-    if (!message || locked || savingPreset || sending.current || remoteStreaming || !ready) return;
+    if (!message || savingPreset || sending.current || remoteStreaming || !ready) return;
     sending.current = true;
     setBusy(true);
-    lock(true);
+    activity(session.id, true);
     setError("");
     let accepted = false;
     try {
@@ -142,8 +155,28 @@ function Conversation({
       const id = r.headers.get("x-request-id") ?? "";
       setPendingId(id);
       setText("");
-      setTurns((prev) => [...prev, { id, message, reply: "", status: "streaming", preset: session.preset }]);
+      setTurns((prev) => [
+        ...prev,
+        {
+          id,
+          message,
+          reply: "",
+          status: "streaming",
+          preset: session.preset,
+          provider: session.provider,
+          model: session.model,
+        },
+      ]);
       for await (const event of chatEvents(r)) {
+        if (event.type === "error") {
+          const errors = {
+            provider_auth: "공급자 API 키와 접근 권한을 확인하세요.",
+            provider_limit: "공급자 요청 한도에 도달했습니다.",
+            timeout: "응답 시간이 초과되었습니다.",
+            provider_failed: "공급자 응답을 완료하지 못했습니다. 모델 ID와 서버 설정을 확인하세요.",
+          };
+          setError(errors[event.code]);
+        }
         setTurns((prev) =>
           prev.map((t) => {
             if (t.id !== id) return t;
@@ -172,7 +205,7 @@ function Conversation({
       }
       sending.current = false;
       setBusy(false);
-      lock(false);
+      activity(session.id, false);
       setPendingId("");
     }
   }
@@ -184,16 +217,22 @@ function Conversation({
     }
   }
   return (
-    <section className="conversation">
+    <section className="conversation" hidden={!visible}>
       <header>
         <h2>{session.title}</h2>
+        <ModelPicker
+          selection={session}
+          options={options}
+          disabled={busy || remoteStreaming || savingPreset || !ready}
+          save={changeSettings}
+        />
         <label className="preset">
           프리셋{" "}
           <select
             aria-label="프리셋"
             value={session.preset}
-            disabled={locked || remoteStreaming || savingPreset || !ready}
-            onChange={(e) => void changePreset(e.target.value as Preset)}
+            disabled={busy || remoteStreaming || savingPreset || !ready}
+            onChange={(e) => void changeSettings({ preset: e.target.value as Preset })}
           >
             {Object.entries(presets).map(([k, v]) => (
               <option key={k} value={k}>
@@ -215,7 +254,10 @@ function Conversation({
             <article key={t.id}>
               <div className="user-message">{t.message}</div>
               <div className="byline">
-                <Mark /> AGS <small>MOCK</small>
+                <Mark /> AGS{" "}
+                <small>
+                  {providerNames[t.provider]} {t.model}
+                </small>
               </div>
               <div className="reply">{t.reply}</div>
               {statusLabels[t.status] && <small className="status">{statusLabels[t.status]}</small>}
@@ -227,7 +269,7 @@ function Conversation({
       <div className="composer">
         <form onSubmit={send}>
           <textarea
-            disabled={!ready || (locked && !busy)}
+            disabled={!ready}
             aria-label="메시지"
             placeholder="메시지 입력"
             value={text}
@@ -241,7 +283,7 @@ function Conversation({
           />
           <div className="actions">
             <small>
-              <span className="dot" /> 로컬 mock
+              <span className="dot" /> {providerNames[session.provider]}
             </small>
             {busy ? (
               <button type="button" disabled={!pendingId} onClick={() => void cancel()}>
@@ -251,7 +293,7 @@ function Conversation({
               <button
                 type="submit"
                 className="primary"
-                disabled={!ready || locked || !text.trim() || remoteStreaming || savingPreset}
+                disabled={!ready || !text.trim() || remoteStreaming || savingPreset}
               >
                 전송 ↑
               </button>
@@ -270,7 +312,11 @@ function Workspace({ token }: { token: string }) {
   const [ready, setReady] = useState(false);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
-  const current = sessions.find((s) => s.id === id);
+  const [options, setOptions] = useState<ProviderOption[]>([]);
+  const [running, setRunning] = useState<string[]>([]);
+  const activity = (key: string, active: boolean) =>
+    setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
+  const mounted = sessions.filter((s) => s.id === id || running.includes(s.id));
   const select = useCallback((id: string) => {
     setId(id);
     sessionStorage.setItem("ags-session", id);
@@ -279,8 +325,12 @@ function Workspace({ token }: { token: string }) {
     let alive = true;
     (async () => {
       try {
-        const rows: Session[] = await (await api(token, "/api/sessions")).json();
+        const [rows, choices]: [Session[], ProviderOption[]] = await Promise.all([
+          api(token, "/api/sessions").then((r) => r.json()),
+          api(token, "/api/providers").then((r) => r.json()),
+        ]);
         if (alive) {
+          setOptions(choices);
           setSessions(rows);
           select(rows.find((s) => s.id === sessionStorage.getItem("ags-session"))?.id ?? rows[0]?.id ?? "");
           setReady(true);
@@ -327,20 +377,24 @@ function Workspace({ token }: { token: string }) {
               onClick={() => select(s.id)}
             >
               {s.title}
+              {running.includes(s.id) && <small> · 응답 중</small>}
             </button>
           ))}
         </nav>
         {error && <p role="alert">{error}</p>}
       </aside>
-      {current ? (
-        <Conversation
-          key={current.id}
-          token={token}
-          session={current}
-          lock={setLocked}
-          locked={locked}
-          update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
-        />
+      {mounted.length ? (
+        mounted.map((current) => (
+          <Conversation
+            key={current.id}
+            token={token}
+            session={current}
+            activity={activity}
+            visible={current.id === id}
+            options={options}
+            update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
+          />
+        ))
       ) : (
         <section className="empty">
           <Mark />
