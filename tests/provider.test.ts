@@ -186,3 +186,92 @@ test("이전 DB의 세션·턴은 mock으로 마이그레이션하고 설정과 
     next.close();
   }
 });
+
+test("모델 목록은 공급자별로 정규화하고 동시·반복 조회를 공유한다", async () => {
+  let calls = 0;
+  const providers = configureProviders(
+    { AGS_CUSTOM_BASE_URL: "http://127.0.0.1:4000/api/v1", AGS_CUSTOM_API_KEY: secret },
+    async (url, init) => {
+      calls++;
+      assert.equal(url, "http://127.0.0.1:4000/api/v1/models");
+      assert.equal(init?.redirect, "error");
+      assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${secret}`);
+      return Response.json({
+        data: [
+          { id: "test/model", name: "Fixture", context_length: 8192, other: secret },
+          { id: "test/model" },
+          { id: " x" },
+          { id: secret },
+        ],
+      });
+    },
+  );
+  const expected = [{ id: "test/model", name: "Fixture", contextLength: 8192 }];
+  const [a, b] = await Promise.all([providers.models("custom"), providers.models("custom")]);
+  assert.deepEqual(a, expected);
+  assert.deepEqual(b, expected);
+  assert.deepEqual(await providers.models("custom"), expected);
+  assert.equal(calls, 1);
+});
+
+test("목록 조회 실패 후에도 모델 ID 직접 적용과 즐겨찾기 저장이 된다", async (t) => {
+  const store = new SessionStore(":memory:");
+  t.after(() => store.close());
+  const providers = configureProviders(
+    { AGS_CUSTOM_BASE_URL: "http://localhost:1234/v1" },
+    async () => new Response(secret, { status: 404 }),
+  );
+  const token = "x".repeat(32);
+  const base = await listen(t, createChatServer(token, undefined, undefined, store, providers));
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const path = `${base}/api/providers/custom/models`;
+  assert.equal((await fetch(path)).status, 401);
+  const response = await fetch(path, { headers });
+  assert.equal(response.status, 502);
+  assert.ok(!(await response.text()).includes(secret));
+  const selection = { provider: "custom", model: "my/manual-model" };
+  const session = await fetch(`${base}/api/sessions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(selection),
+  });
+  assert.equal((await session.json()).model, selection.model);
+  const pins = `${base}/api/settings/favorites`;
+  for (const pinned of [true, true, false]) {
+    const r = await fetch(pins, { method: "PUT", headers, body: JSON.stringify({ ...selection, pinned }) });
+    assert.deepEqual(await r.json(), pinned ? [selection] : []);
+  }
+});
+
+test("저장 장치가 계속 실패해도 SSE 오류 이벤트로 한 번 종료한다", async (t) => {
+  const store = new SessionStore(":memory:");
+  t.after(() => store.close());
+  const session = store.create();
+  t.mock.method(store, "append", () => {
+    throw new Error(secret);
+  });
+  t.mock.method(store, "finish", () => {
+    throw new Error(secret);
+  });
+  const base = await listen(
+    t,
+    createChatServer(
+      "x".repeat(32),
+      async function* (_, signal) {
+        yield "조각";
+        await delay(1200, undefined, { signal });
+      },
+      2000,
+      store,
+    ),
+  );
+  const res = await fetch(`${base}/api/sessions/${session.id}/chat`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${"x".repeat(32)}`, "content-type": "application/json" },
+    body: JSON.stringify({ message: "저장" }),
+  });
+  const wire = await res.text();
+  assert.match(wire, /"code":"storage_failed"/);
+  assert.equal(wire.match(/event: error/g)?.length, 1);
+  assert.ok(!wire.includes(secret));
+});

@@ -22,3 +22,9 @@ export function isModelSelection(value: unknown): value is ModelSelection {
     /^[!-~]{1,256}$/.test(value.model)
   );
 }
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  contextLength?: number;
+}

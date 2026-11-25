@@ -58,6 +58,7 @@ export function createChatServer(
   timeoutMs = 60_000,
   store?: SessionStore,
   providers = configureProviders({}),
+  { totalTimeoutMs = 600_000, stateDirectory = "" } = {},
 ) {
   if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) throw new Error("invalid_local_token");
   const authorization = Buffer.from(`Bearer ${token}`);
@@ -91,9 +92,47 @@ export function createChatServer(
       if (req.method !== "GET") return allow("GET");
       return json(providers.options);
     }
+    const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models$/.exec(path);
+    if (catalog) {
+      if (req.method !== "GET") return allow("GET");
+      const option = providers.options.find((item) => item.id === catalog[1]);
+      if (!option?.enabled) throw new RequestError(400, "provider_unavailable");
+      try {
+        return json(await providers.models(option.id));
+      } catch {
+        throw new RequestError(502, "catalog_unavailable");
+      }
+    }
+    if (path === "/api/settings/runtime") {
+      if (req.method !== "GET") return allow("GET");
+      return json({ idleTimeoutMs: timeoutMs, totalTimeoutMs, stateDirectory });
+    }
+    if (path === "/api/settings/favorites" && store) {
+      if (req.method === "GET") return json(store.favorites());
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const body = await readBody(req);
+      if (
+        !isModelSelection(body) ||
+        body.provider === "mock" ||
+        !("pinned" in body) ||
+        typeof body.pinned !== "boolean"
+      )
+        throw new RequestError(400, "invalid_favorite");
+      store.setFavorite(body, body.pinned);
+      return json(store.favorites());
+    }
     if (path === "/api/sessions" && store) {
       if (req.method === "GET") return json(store.list());
       if (req.method === "POST") {
+        if (Number(req.headers["content-length"]) || req.headers["transfer-encoding"]) {
+          const selection = await readBody(req);
+          if (
+            !isModelSelection(selection) ||
+            !providers.options.find((o) => o.id === selection.provider)?.enabled
+          )
+            throw new RequestError(400, "invalid_model");
+          return json(store.create(selection), 201);
+        }
         const router = providers.options.find((o) => o.id === "openrouter" && o.enabled);
         const selection = { provider: "openrouter", model: router?.defaultModel };
         return json(store.create(isModelSelection(selection) ? selection : undefined), 201);
@@ -145,16 +184,23 @@ export function createChatServer(
     const { signal } = controller;
     const disconnected = () => controller.abort();
     const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
+    const deadline = setTimeout(() => controller.abort("timeout"), totalTimeoutMs);
     active.set(id, controller);
     res.once("close", disconnected);
+    let storageFailed = false;
     let pending = "";
     let checkpoint: ReturnType<typeof setTimeout> | undefined;
     function flush() {
       clearTimeout(checkpoint);
       checkpoint = undefined;
       if (pending) {
-        store?.append(id, pending);
-        pending = "";
+        try {
+          store?.append(id, pending);
+          pending = "";
+        } catch (error) {
+          storageFailed = true;
+          throw error;
+        }
       }
     }
     function saveChunk(text: string) {
@@ -184,10 +230,12 @@ export function createChatServer(
               session.preset,
               [...store.history(session.id), { role: "user", content: message }],
               signal,
+              () => timer.refresh(),
             )
           : provider(message, signal, session?.preset);
       for await (const text of reply) {
         signal.throwIfAborted();
+        timer.refresh();
         saveChunk(text);
         if (!res.write(encodeEvent({ type: "delta", text }))) {
           await once(res, "drain", { signal });
@@ -195,29 +243,45 @@ export function createChatServer(
       }
       signal.throwIfAborted();
       flush();
-      if (session) store?.finish(id, "completed");
+      try {
+        if (session) store?.finish(id, "completed");
+      } catch (error) {
+        storageFailed = true;
+        throw error;
+      }
       res.end(encodeEvent({ type: "done" }));
     } catch (error) {
-      flush();
+      try {
+        flush();
+      } catch {
+        storageFailed = true;
+      }
       const cancelled = signal.aborted && signal.reason !== "timeout" && signal.reason !== "storage_failed";
-      if (session) store?.finish(id, cancelled ? "cancelled" : "failed");
+      try {
+        if (session) store?.finish(id, cancelled && !storageFailed ? "cancelled" : "failed");
+      } catch {
+        storageFailed = true;
+      }
       if (!res.destroyed) {
-        const terminal: ChatEvent = cancelled
-          ? { type: "cancelled" }
-          : {
-              type: "error",
-              code:
-                signal.reason === "timeout"
-                  ? "timeout"
-                  : error instanceof ProviderError
-                    ? error.code
-                    : "provider_failed",
-            };
+        const terminal: ChatEvent = storageFailed
+          ? { type: "error", code: "storage_failed" }
+          : cancelled
+            ? { type: "cancelled" }
+            : {
+                type: "error",
+                code:
+                  signal.reason === "timeout"
+                    ? "timeout"
+                    : error instanceof ProviderError
+                      ? error.code
+                      : "provider_failed",
+              };
         res.end(encodeEvent(terminal));
       }
     } finally {
       clearTimeout(checkpoint);
       clearTimeout(timer);
+      clearTimeout(deadline);
       active.delete(id);
       res.off("close", disconnected);
     }

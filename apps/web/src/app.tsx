@@ -7,7 +7,7 @@ import {
   type ProviderOption,
   type ModelSelection,
 } from "../../../packages/contracts/src/providers.ts";
-import { ModelPicker } from "./ModelPicker.tsx";
+import { SettingsCenter } from "./SettingsCenter.tsx";
 import "./style.css";
 
 function Mark() {
@@ -83,7 +83,7 @@ function Conversation({
   session,
   update,
   activity,
-  options,
+  openSettings,
   visible,
 }: {
   token: string;
@@ -91,7 +91,7 @@ function Conversation({
   update: (s: Session) => void;
   activity: (id: string, running: boolean) => void;
   visible: boolean;
-  options: ProviderOption[];
+  openSettings: () => void;
 }) {
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -170,6 +170,7 @@ function Conversation({
       for await (const event of chatEvents(r)) {
         if (event.type === "error") {
           const errors = {
+            storage_failed: "대화 기록을 저장하지 못했습니다. 저장 공간을 확인하세요.",
             provider_auth: "공급자 API 키와 접근 권한을 확인하세요.",
             provider_limit: "공급자 요청 한도에 도달했습니다.",
             timeout: "응답 시간이 초과되었습니다.",
@@ -220,12 +221,15 @@ function Conversation({
     <section className="conversation" hidden={!visible}>
       <header>
         <h2>{session.title}</h2>
-        <ModelPicker
-          selection={session}
-          options={options}
+        <button
+          type="button"
+          className="model-label"
+          aria-label="모델 설정"
           disabled={busy || remoteStreaming || savingPreset || !ready}
-          save={changeSettings}
-        />
+          onClick={openSettings}
+        >
+          {providerNames[session.provider]} {session.model} ▾
+        </button>
         <label className="preset">
           프리셋{" "}
           <select
@@ -313,6 +317,8 @@ function Workspace({ token }: { token: string }) {
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
+  const [settings, setSettings] = useState(false);
+  const currentSession = sessions.find((s) => s.id === id);
   const [running, setRunning] = useState<string[]>([]);
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
@@ -356,6 +362,18 @@ function Workspace({ token }: { token: string }) {
       setLocked(false);
     }
   }
+  async function applyModel(selection: ModelSelection) {
+    if (currentSession) {
+      const changed: Session = await (
+        await api(token, `/api/sessions/${currentSession.id}`, "PATCH", selection)
+      ).json();
+      setSessions((prev) => prev.map((s) => (s.id === changed.id ? changed : s)));
+    } else {
+      const created: Session = await (await api(token, "/api/sessions", "POST", selection)).json();
+      setSessions((prev) => [created, ...prev]);
+      select(created.id);
+    }
+  }
   return (
     <main className="layout">
       <aside>
@@ -382,7 +400,25 @@ function Workspace({ token }: { token: string }) {
           ))}
         </nav>
         {error && <p role="alert">{error}</p>}
+        <button
+          type="button"
+          className="settings-launcher"
+          disabled={!ready || locked || running.includes(id)}
+          onClick={() => setSettings(true)}
+        >
+          설정
+        </button>
       </aside>
+      {settings && (
+        <SettingsCenter
+          token={token}
+          selection={currentSession ?? { provider: "mock", model: "" }}
+          sessionTitle={currentSession?.title}
+          options={options}
+          close={() => setSettings(false)}
+          save={applyModel}
+        />
+      )}
       {mounted.length ? (
         mounted.map((current) => (
           <Conversation
@@ -391,7 +427,7 @@ function Workspace({ token }: { token: string }) {
             session={current}
             activity={activity}
             visible={current.id === id}
-            options={options}
+            openSettings={() => setSettings(true)}
             update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
           />
         ))

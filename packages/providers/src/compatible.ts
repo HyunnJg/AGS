@@ -1,4 +1,5 @@
-import type { ModelSelection, ProviderOption } from "../../contracts/src/providers.ts";
+import { createCatalog } from "./catalog.ts";
+import type { ModelSelection, ProviderId, ProviderOption } from "../../contracts/src/providers.ts";
 import type { Preset } from "../../contracts/src/sessions.ts";
 
 export interface Message {
@@ -25,7 +26,7 @@ function customEndpoint(base: string | undefined) {
     !(url.protocol === "https:" || (url.protocol === "http:" && local))
   )
     throw new Error("invalid_custom_url");
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/chat/completions`;
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
   return url.href;
 }
 
@@ -39,7 +40,7 @@ export class ProviderError extends Error {
 }
 
 // Decode frames across arbitrary network and UTF-8 boundaries, including SSE comments.
-async function* readReply(body: ReadableStream<Uint8Array>) {
+async function* readReply(body: ReadableStream<Uint8Array>, onActivity?: () => void) {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let pending = "";
@@ -47,6 +48,7 @@ async function* readReply(body: ReadableStream<Uint8Array>) {
     while (true) {
       const { value, done } = await reader.read();
       if (done) throw new ProviderError("provider_failed");
+      onActivity?.();
       pending += decoder.decode(value, { stream: true });
       for (;;) {
         const delimiter = /\r?\n\r?\n/.exec(pending);
@@ -85,18 +87,24 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     },
     { id: "custom", enabled: Boolean(custom), defaultModel: env.AGS_CUSTOM_MODEL?.trim() || "" },
   ];
+  function endpoint(provider: ProviderId) {
+    const router = provider === "openrouter";
+    const url = router ? "https://openrouter.ai/api/v1/" : custom;
+    const key = router ? env.AGS_OPENROUTER_API_KEY : env.AGS_CUSTOM_API_KEY;
+    return { url, key };
+  }
   async function* stream(
     selection: ModelSelection,
     preset: Preset,
     messages: Message[],
     signal: AbortSignal,
+    onActivity?: () => void,
   ) {
-    const router = selection.provider === "openrouter";
-    const url = router ? "https://openrouter.ai/api/v1/chat/completions" : custom;
-    const key = router ? env.AGS_OPENROUTER_API_KEY : env.AGS_CUSTOM_API_KEY;
-    if (!url || (router && !key) || selection.provider === "mock") throw new ProviderError("provider_failed");
+    const { url, key } = endpoint(selection.provider);
+    if (!url || (selection.provider === "openrouter" && !key) || selection.provider === "mock")
+      throw new ProviderError("provider_failed");
     try {
-      const response = await send(url, {
+      const response = await send(new URL("chat/completions", url).href, {
         method: "POST",
         redirect: "error",
         signal,
@@ -120,12 +128,12 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         if ([401, 403].includes(response.status)) throw new ProviderError("provider_auth");
         throw new ProviderError(response.status === 429 ? "provider_limit" : "provider_failed");
       }
-      yield* readReply(response.body);
+      yield* readReply(response.body, onActivity);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof ProviderError) throw error;
       throw new ProviderError("provider_failed");
     }
   }
-  return { options, stream };
+  return { options, stream, models: createCatalog(send, endpoint) };
 }
