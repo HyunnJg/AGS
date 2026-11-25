@@ -1,3 +1,4 @@
+import { maxReferenceChars } from "../../../packages/contracts/src/workspace.ts";
 import type { IncomingMessage } from "node:http";
 import type { SessionStore } from "./sessions.ts";
 import {
@@ -18,9 +19,8 @@ export async function workspaceApi(
   json: Json,
   allow: (methods: string) => void,
 ) {
-  const route = /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity))?$/.exec(
-    path,
-  );
+  const route =
+    /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity|attach))?$/.exec(path);
   if (!route) throw new WorkspaceError(404, "unknown_route");
   const [, id, action] = route;
   if (!id && req.method === "GET") return json(store.catalog());
@@ -62,6 +62,45 @@ export async function workspaceApi(
       if (current?.root !== root.path || current.identity !== root.identity)
         throw new WorkspaceError(409, "folder_changed");
     };
+    if (action === "attach") {
+      if (!("session" in body) || typeof body.session !== "string" || !store.get(body.session))
+        throw new WorkspaceError(404, "unknown_session");
+      if (
+        !("root" in body) ||
+        !("version" in body) ||
+        typeof body.version !== "string" ||
+        !/^[a-f0-9]{64}$/.test(body.version)
+      )
+        throw new WorkspaceError(400, "invalid_version");
+      if (
+        !("start" in body) ||
+        !("end" in body) ||
+        typeof body.start !== "number" ||
+        typeof body.end !== "number" ||
+        !Number.isSafeInteger(body.start) ||
+        !Number.isSafeInteger(body.end) ||
+        body.start < 1 ||
+        body.end < body.start ||
+        body.end - body.start >= 80
+      )
+        throw new WorkspaceError(400, "invalid_range");
+      const page = await readLines(root, body.path, body.start, body.version, body.end - body.start + 1);
+      if (page.end !== body.end || !page.text.trim()) throw new WorkspaceError(400, "invalid_range");
+      if (page.clipped || page.text.length > maxReferenceChars)
+        throw new WorkspaceError(413, "reference_too_large");
+      checkActive();
+      const reference = store.addReference(
+        body.session,
+        id,
+        body.path,
+        body.version,
+        page.start,
+        page.end,
+        page.text,
+      );
+      if (!reference) throw new WorkspaceError(409, "reference_limit");
+      return json({ id: reference });
+    }
     if (action === "search") {
       if (
         ("caseSensitive" in body && typeof body.caseSensitive !== "boolean") ||
@@ -110,7 +149,7 @@ export async function workspaceApi(
     let error = e;
     if (["ENOENT", "ENOTDIR", "ESTALE"].includes(code)) error = new WorkspaceError(404, "path_unavailable");
     if (["EACCES", "EPERM", "ELOOP"].includes(code)) error = new WorkspaceError(403, "outside_workspace");
-    if (action === "entries" || action === "file" || action === "search")
+    if (action === "entries" || action === "file" || action === "search" || action === "attach")
       store.recordFileActivity(
         id,
         action,

@@ -1,3 +1,4 @@
+import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
 import type { Project, Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import type { RegisteredRoot } from "./workspace-files.ts";
@@ -36,6 +37,11 @@ export class SessionStore {
           id TEXT PRIMARY KEY, title TEXT NOT NULL, preset TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,root TEXT,identity TEXT);
+        CREATE TABLE IF NOT EXISTS file_references(
+          id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), project TEXT NOT NULL REFERENCES projects(id),
+          path TEXT NOT NULL, version TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, text TEXT NOT NULL,
+          UNIQUE(session,project,path,version,start,end)
+        );
         CREATE TABLE IF NOT EXISTS file_activity(
           id INTEGER PRIMARY KEY, project TEXT NOT NULL REFERENCES projects(id), time INTEGER NOT NULL,
           action TEXT NOT NULL, path TEXT, start INTEGER, end INTEGER, error TEXT
@@ -82,6 +88,49 @@ export class SessionStore {
       this.db.close();
       throw error;
     }
+  }
+
+  references(session: string): FileReference[] {
+    return this.db
+      .prepare(`SELECT r.id,p.name AS project,r.path,r.start,r.end,r.text FROM file_references r
+      JOIN projects p ON p.id=r.project WHERE r.session=? ORDER BY r.rowid`)
+      .all(session) as unknown as FileReference[];
+  }
+  addReference(
+    session: string,
+    project: string,
+    path: string,
+    version: string,
+    start: number,
+    end: number,
+    text: string,
+  ) {
+    const prior = this.db
+      .prepare(
+        "SELECT id FROM file_references WHERE session=? AND project=? AND path=? AND version=? AND start=? AND end=?",
+      )
+      .get(session, project, path, version, start, end);
+    if (prior) return String(prior.id);
+    const size = this.db.prepare("SELECT count(*) AS n FROM file_references WHERE session=?").get(session);
+    if (Number(size?.n) >= maxReferences) return null;
+    const id = randomUUID();
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO file_references(id,session,project,path,version,start,end,text) VALUES(?,?,?,?,?,?,?,?)",
+        )
+        .run(id, session, project, path, version, start, end, text);
+      this.recordFileActivity(project, "attach", path, null, start, end);
+      this.db.exec("COMMIT");
+      return id;
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+  removeReference(session: string, id: string) {
+    this.db.prepare("DELETE FROM file_references WHERE session=? AND id=?").run(session, id);
   }
 
   recordFileActivity(

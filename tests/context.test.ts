@@ -109,3 +109,21 @@ test("고정 지침과 안정적인 앞부분은 초안 변경에도 같고 자�
   assert.deepEqual(small.excluded, ["retrieval"]);
   assert.equal(small.fits, true);
 });
+
+test("첨부 발췌는 예산을 넘으면 통째로 제외하고 수동 참고 자료는 유지한다", () => {
+  const manual = { memory: "", retrieval: "메모", revision: 0 };
+  const normal = assembleContext("general", "", defaultLimits, [], "현재", null, defaultOrder, manual);
+  const limited = assembleContext(
+    "general",
+    "",
+    { ...defaultLimits, inputBudget: normal.estimatedInput },
+    [],
+    "현재",
+    null,
+    defaultOrder,
+    manual,
+    [{ id: "example", project: "자료", path: "doc.txt", start: 1, end: 1, text: "긴 문장".repeat(100) }],
+  );
+  assert.deepEqual(limited.messages, normal.messages);
+  assert.deepEqual(limited.excluded, ["retrieval"]);
+});

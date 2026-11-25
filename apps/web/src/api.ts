@@ -10,6 +10,8 @@ const workspaceMessages: Record<string, string> = {
   search_cancelled: "검색이 중단됐습니다.",
   no_workspace_folder: "연결된 작업 폴더가 없습니다.",
   invalid_search: "검색할 문구를 확인하세요.",
+  reference_too_large: "6,000자 이하로 줄 범위를 좁혀 주세요. 화면에서 잘린 긴 줄은 첨부할 수 없습니다.",
+  reference_limit: "대화에 첨부한 자료가 8개입니다. 기존 자료를 뺀 뒤 다시 첨부하세요.",
   excluded_folder: "이 폴더는 기본 검색 범위에서 제외됩니다.",
   hardlink_not_supported: "하드링크 파일은 다른 경로와 내용을 공유해 열 수 없습니다.",
   search_result_changed: "검색 후 원본이 변경됐습니다. 다시 검색해 현재 줄을 확인하세요.",

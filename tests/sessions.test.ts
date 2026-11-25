@@ -67,3 +67,32 @@ test("프로젝트별 최신 파일 활동 100건을 재시작 뒤에도 유지�
     reopened.close();
   }
 });
+
+test("첨부 자료는 대화별로 복원되고 같은 요청을 재시도해도 중복되지 않는다", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-refs-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "sessions.sqlite"),
+    db = new SessionStore(path);
+  const a = db.create(),
+    b = db.create(),
+    project = db.addProject("자료");
+  const attach = (line: number) => db.addReference(a.id, project, "notes.md", "v", line, line, "선택한 줄");
+  const first = attach(1);
+  assert.ok(first);
+  for (let line = 2; line <= 8; line++) assert.ok(attach(line));
+  assert.equal(attach(9), null);
+  assert.equal(attach(1), first);
+  db.removeReference(b.id, first);
+  db.close();
+  const next = new SessionStore(path);
+  try {
+    assert.equal(next.references(a.id).length, 8);
+    assert.equal(next.references(b.id).length, 0);
+    assert.equal(next.fileActivity(project).length, 8);
+    assert.ok(!JSON.stringify(next.fileActivity(project)).includes("선택한 줄"));
+    next.removeReference(a.id, first);
+    assert.equal(next.references(a.id).length, 7);
+  } finally {
+    next.close();
+  }
+});

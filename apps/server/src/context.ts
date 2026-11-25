@@ -1,3 +1,4 @@
+import type { FileReference } from "../../../packages/contracts/src/workspace.ts";
 import {
   systemText,
   defaultOrder,
@@ -25,6 +26,7 @@ export function assembleContext(
   modelWindow: number | null = null,
   order: Block[] = defaultOrder,
   sources: SessionSources = emptySources,
+  references: FileReference[] = [],
 ): ContextPreview {
   const system: Message = { role: "system", content: systemText(prompt, preset) };
   const request: Message = { role: "user", content: draft };
@@ -51,14 +53,24 @@ export function assembleContext(
         start -= 2;
       }
       content.history = history.slice(start);
-    } else if (sources[block].trim()) {
-      const text = `${blockNames[block]} (참고 자료)
-${sources[block]}`;
-      const size = cost(text);
-      if (estimatedInput + size <= budget) {
-        content[block] = [{ role: "user", content: text }];
-        estimatedInput += size;
-      } else excluded.push(block);
+    } else {
+      const excerpts = sources[block].trim()
+        ? [
+            `${blockNames[block]} (참고 자료)
+${sources[block]}`,
+          ]
+        : [];
+      if (block === "retrieval")
+        for (const ref of references)
+          excerpts.push(`첨부 파일 (참고 자료) · ${ref.project} / ${ref.path} · ${ref.start}–${ref.end}줄
+${ref.text}`);
+      for (const text of excerpts) {
+        const size = cost(text);
+        if (estimatedInput + size <= budget) {
+          content[block].push({ role: "user", content: text });
+          estimatedInput += size;
+        } else if (!excluded.includes(block)) excluded.push(block);
+      }
     }
   }
   const messages = [system, ...order.flatMap((block) => content[block])];

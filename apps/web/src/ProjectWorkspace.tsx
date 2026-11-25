@@ -1,3 +1,4 @@
+import { AttachLines } from "./FileReferences.tsx";
 import { WorkspaceActivity } from "./WorkspaceActivity.tsx";
 import { WorkspaceSearch } from "./WorkspaceSearch.tsx";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -46,7 +47,15 @@ function NameForm({ label, save }: { label: string; save: (name: string) => Prom
 }
 type View = { path: string; folder: boolean; position: number; version?: string; excerpt?: string };
 const top: View = { path: "", folder: true, position: 0 };
-function FileBrowser({ token, project }: { token: string; project: Project }) {
+function FileBrowser({
+  token,
+  project,
+  current,
+}: {
+  token: string;
+  project: Project;
+  current: Session | undefined;
+}) {
   const [view, setView] = useState(top);
   const [data, setData] = useState<{
     view: View;
@@ -166,6 +175,17 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
           </small>
           {view.excerpt && result.file.clipped && <p>검색 일치 부분 · {view.excerpt}</p>}
           <pre>{result.file.text}</pre>
+          {current && result.file.total > 0 && (
+            <AttachLines
+              key={`${current.id}:${view.path}:${result.file.start}:${result.file.version}`}
+              token={token}
+              project={project}
+              path={view.path}
+              page={result.file}
+              session={current}
+              reopen={() => enter(view.path, false)}
+            />
+          )}
           {result.file.clipped && <small>긴 줄은 앞 2,048자까지 표시합니다.</small>}
           {result.file.total > 0 && (
             <form
@@ -204,6 +224,7 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
   );
 }
 function ProjectFolder({
+  current,
   token,
   project,
   refresh,
@@ -211,6 +232,7 @@ function ProjectFolder({
   token: string;
   project: Project;
   refresh: (id: string) => Promise<void>;
+  current: Session | undefined;
 }) {
   const [path, setPath] = useState(project.root ?? "");
   const [busy, setBusy] = useState(false),
@@ -257,7 +279,7 @@ function ProjectFolder({
         </form>
         {error && <p role="alert">{error}</p>}
       </details>
-      {project.root && <FileBrowser token={token} project={project} />}
+      {project.root && <FileBrowser token={token} project={project} current={current} />}
     </>
   );
 }
@@ -278,7 +300,7 @@ export function ProjectWorkspace({
   const dialog = useRef<HTMLDialogElement>(null);
   const [activity, setActivity] = useState(false);
   const [catalog, setCatalog] = useState<WorkspaceCatalog>();
-  const [projectId, setProject] = useState(""),
+  const [projectId, setProject] = useState(() => sessionStorage.getItem("ags-project") ?? ""),
     [sectionId, setSection] = useState("");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -307,8 +329,10 @@ export function ProjectWorkspace({
         if (!alive) return;
         const selected = data.sections.find((s) => s.id === current?.sectionId);
         setCatalog(data);
-        setProject(selected?.projectId ?? sessionStorage.getItem("ags-project") ?? "");
-        setSection(selected?.id ?? "");
+        if (selected) {
+          setProject(selected.projectId);
+          setSection(selected.id);
+        }
       })
       .catch((e) => {
         if (alive) setError(message(e));
@@ -441,7 +465,13 @@ export function ProjectWorkspace({
               </button>
             </fieldset>
             <div hidden={activity}>
-              <ProjectFolder key={project.root ?? ""} token={token} project={project} refresh={refresh} />
+              <ProjectFolder
+                current={current}
+                key={project.root ?? ""}
+                token={token}
+                project={project}
+                refresh={refresh}
+              />
             </div>
             {activity && <WorkspaceActivity token={token} project={project.id} />}
           </section>

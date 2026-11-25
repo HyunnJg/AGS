@@ -73,11 +73,14 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 | `POST /api/projects`, `POST /api/projects/{id}/sections` | `{name}`으로 생성하고 `{id}`를 반환한다. 프로젝트와 기본 ‘일반’ 섹션은 함께 생성한다. |
 | `PUT /api/projects/{id}/root` | `{path,previous}`로 로컬 폴더를 연결한다. path가 null이면 연결을 해제하고, 기존 경로가 previous와 다르면 409를 반환한다. |
 | `POST /api/projects/{id}/entries` | `{path,offset?}`으로 목록을 최대 100개와 다음 offset으로 반환한다. path는 등록 폴더 기준이며 빈 문자열은 최상위다. |
+| `POST /api/projects/{id}/attach` | `{session,root,path,version,start,end}`로 사용자가 확인한 줄 범위를 대화에 첨부한다. file 응답의 version이 현재 텍스트와 달라지면 409다. 최대 80줄·6,000자이고 화면에서 잘린 줄은 제외해야 한다. 같은 대화·프로젝트·경로·버전·범위의 재요청은 같은 id를 반환한다. |
+| `GET /api/sessions/{id}/references` | 해당 대화에 저장한 발췌 목록과 본문을 반환한다. 대화마다 8개까지 저장한다. |
+| `DELETE /api/sessions/{id}/references/{refId}` | 해당 대화에서 발췌를 빼고 남은 목록을 반환한다. |
 | `GET /api/projects/{id}/activity` | 프로젝트의 최근 파일 조회 활동 최대 100건을 최신순으로 반환한다. time은 Unix 밀리초다. 완료한 요청에는 action·상대 path·해당 시 start/end 줄, 실패한 요청에는 action·오류 코드가 남는다. 검색어·발췌·본문은 저장하지 않는다. |
 | `POST /api/projects/{id}/search` | `{path,query,root?,caseSensitive?}`로 하위 UTF-8 파일에서 1~120자의 한 줄 문구를 찾는다. hits에는 상대 경로·줄 번호·일치 주변 발췌·텍스트 버전이 포함된다. 기존 호출과의 호환을 위해 API는 caseSensitive 생략 시 true이며, 화면은 기본 false를 보낸다. files는 검색한 파일 수, skipped는 읽지 못해 건너뛴 항목 수다. |
 | `POST /api/projects/{id}/file` | `{path,start?}`로 1부터 시작하는 UTF-8 줄 범위를 읽는다. 검색 결과의 version을 함께 보내면 텍스트가 변경된 경우 409를 반환한다. 최대 1 MiB, 80줄이고 한 줄이 2,048자를 넘으면 clipped가 true다. |
 | `POST /api/sessions` | 기존 형식에 sectionId를 추가할 수 있다. sectionId만 전달하면 일반 새 대화와 같은 공급자 기본값을 쓴다. |
 
-목록과 파일 읽기 요청에도 화면에서 확인한 root를 함께 보낼 수 있다. 연결이 바뀌면 409를 반환한다. 링크, 장치 파일, 운영체제의 최상위 폴더, 서버 비공개 상태 폴더와 겹치는 루트는 파일 도구의 범위에서 제외한다. 모델에는 파일 도구나 미리보기 본문이 전달되지 않는다.
+목록과 파일 읽기 요청에도 화면에서 확인한 root를 함께 보낼 수 있다. 연결이 바뀌면 409를 반환한다. 링크, 장치 파일, 운영체제의 최상위 폴더, 서버 비공개 상태 폴더와 겹치는 루트는 파일 도구의 범위에서 제외한다. 단순 조회는 모델 입력을 바꾸지 않는다. 사용자가 첨부한 발췌는 대화의 로컬 DB에 보관하고, 다음 요청 조립 시 retrieval 위치에서 수동 참고 자료 뒤에 각각 user 역할로 포함한다. 입력 예산에 들어가지 않는 발췌는 통째로 제외한다. 활동 기록에는 본문이 저장되지 않는다.
 
 검색은 요청당 최대 1,500개 디렉터리 항목, 파일 읽기 시도 200개, 파일 본문 합계 8 MiB, 일치한 줄 50개로 제한한다. 한도 때문에 탐색이 일찍 끝나면 limited가 true다. `.git`, `node_modules`, `dist` 디렉터리와 링크는 탐색에서 제외한다.

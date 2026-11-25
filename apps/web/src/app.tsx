@@ -1,3 +1,4 @@
+import { AttachedReferences } from "./FileReferences.tsx";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -285,6 +286,7 @@ function Conversation({
         </div>
       </div>
       <div className="composer">
+        <AttachedReferences token={token} session={session.id} />
         <form onSubmit={send}>
           <textarea
             disabled={!ready}
