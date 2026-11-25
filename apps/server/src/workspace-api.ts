@@ -1,3 +1,4 @@
+import { workspaceWrite } from "./workspace-writes.ts";
 import { maxReferenceChars } from "../../../packages/contracts/src/workspace.ts";
 import type { IncomingMessage } from "node:http";
 import type { SessionStore } from "./sessions.ts";
@@ -15,12 +16,14 @@ export async function workspaceApi(
   req: IncomingMessage,
   store: SessionStore,
   privateDir: string,
-  readBody: (req: IncomingMessage) => Promise<unknown>,
+  readBody: (req: IncomingMessage, limit?: number) => Promise<unknown>,
   json: Json,
   allow: (methods: string) => void,
 ) {
   const route =
-    /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity|attach))?$/.exec(path);
+    /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity|attach|edit|propose|approve))?$/.exec(
+      path,
+    );
   if (!route) throw new WorkspaceError(404, "unknown_route");
   const [, id, action] = route;
   if (!id && req.method === "GET") return json(store.catalog());
@@ -29,7 +32,7 @@ export async function workspaceApi(
   if (action === "activity" && id) return req.method === "GET" ? json(store.fileActivity(id)) : allow("GET");
   const method = action === "root" ? "PUT" : "POST";
   if (req.method !== method) return allow(id ? method : "GET, POST");
-  const body = await readBody(req);
+  const body = await readBody(req, action === "propose" ? 6 * 1024 * 1024 + 8192 : undefined);
   if (!body || typeof body !== "object") throw new WorkspaceError(400, "invalid_workspace_request");
   if (!id || action === "sections") {
     if (!("name" in body) || typeof body.name !== "string" || !body.name.trim() || body.name.length > 100)
@@ -41,6 +44,7 @@ export async function workspaceApi(
   try {
     if (action === "root") {
       if (
+        ("writable" in body && typeof body.writable !== "boolean") ||
         !("previous" in body) ||
         (body.previous !== null && typeof body.previous !== "string") ||
         !("path" in body) ||
@@ -48,7 +52,8 @@ export async function workspaceApi(
       )
         throw new WorkspaceError(400, "invalid_folder");
       const root = body.path === null ? null : await registerFolder(body.path, privateDir);
-      if (!store.linkRoot(id, body.previous, root)) throw new WorkspaceError(409, "folder_changed");
+      if (!store.linkRoot(id, body.previous, root, "writable" in body && body.writable === true))
+        throw new WorkspaceError(409, "folder_changed");
       return json({ root: root?.path ?? null });
     }
     if (!project.root || !project.identity) throw new WorkspaceError(409, "no_workspace_folder");
@@ -56,6 +61,18 @@ export async function workspaceApi(
       throw new WorkspaceError(400, "invalid_path");
     if ("root" in body && body.root !== project.root) throw new WorkspaceError(409, "folder_changed");
     const root = { path: project.root, identity: project.identity };
+    if (action === "edit" || action === "propose" || action === "approve")
+      return json(
+        await workspaceWrite(
+          store,
+          id,
+          root,
+          project.writeGrant,
+          action,
+          body as Record<string, unknown>,
+          privateDir,
+        ),
+      );
     const checkActive = () => {
       if (req.socket.destroyed) throw new WorkspaceError(409, "search_cancelled");
       const current = store.project(id);

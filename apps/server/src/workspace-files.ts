@@ -26,15 +26,16 @@ async function identity(path: string) {
   const stat = await lstat(path, { bigint: true });
   return { stat, id: `${stat.dev}:${stat.ino}` };
 }
-function validPart(value: string) {
+export function validPart(value: string) {
   return (
     !!value &&
+    !value.toLowerCase().startsWith(".ags-stage-") &&
     value !== "." &&
     value !== ".." &&
-    !/[\\/:]/u.test(value) &&
+    !/[\\/:*?"<>|]/u.test(value) &&
     Array.from(value).every((c) => c.charCodeAt(0) >= 32) &&
     !/[. ]$/.test(value) &&
-    !/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(value)
+    !/^(con|conin\$|conout\$|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(value)
   );
 }
 export async function registerFolder(input: string, privateDir: string): Promise<RegisteredRoot> {
@@ -59,7 +60,7 @@ export async function registerFolder(input: string, privateDir: string): Promise
   if (!stat.isDirectory() || id !== selected.id) deny();
   return { path: canonical, identity: id };
 }
-async function locate(root: RegisteredRoot, path: string) {
+export async function locate(root: RegisteredRoot, path: string) {
   const parts = path === "" ? [] : path.split("/");
   if (parts.some((p) => !validPart(p))) deny();
   const base = await identity(root.path);
@@ -101,7 +102,7 @@ export async function listEntries(
   };
 }
 const maxBytes = 1024 * 1024;
-async function readText(root: RegisteredRoot, path: string, reserve?: (bytes: number) => void) {
+export async function readSnapshot(root: RegisteredRoot, path: string, reserve?: (bytes: number) => void) {
   const node = await locate(root, path);
   if (!node.stat.isFile()) deny();
   if (node.stat.nlink !== 1n) throw new WorkspaceError(403, "hardlink_not_supported");
@@ -143,10 +144,14 @@ async function readText(root: RegisteredRoot, path: string, reserve?: (bytes: nu
     }
     if (data.subarray(0, used).some((b) => b < 9 || (b > 13 && b < 32)))
       throw new WorkspaceError(415, "not_text");
-    return text;
+    return { text, bytes: data.subarray(0, used), stat: after, id: node.id };
   } finally {
     await handle.close();
   }
+}
+
+async function readText(root: RegisteredRoot, path: string, reserve?: (bytes: number) => void) {
+  return (await readSnapshot(root, path, reserve)).text;
 }
 
 function versionOf(text: string) {

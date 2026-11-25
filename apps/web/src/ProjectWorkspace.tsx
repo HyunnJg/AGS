@@ -1,3 +1,4 @@
+import { FileWrite } from "./FileWrite.tsx";
 import { AttachLines } from "./FileReferences.tsx";
 import { WorkspaceActivity } from "./WorkspaceActivity.tsx";
 import { WorkspaceSearch } from "./WorkspaceSearch.tsx";
@@ -57,6 +58,7 @@ function FileBrowser({
   current: Session | undefined;
 }) {
   const [view, setView] = useState(top);
+  const [saved, setSaved] = useState("");
   const [data, setData] = useState<{
     view: View;
     dir?: DirectoryPage;
@@ -87,6 +89,7 @@ function FileBrowser({
   const result = data?.view === view ? data : undefined;
   const nextOffset = result?.dir?.next;
   const enter = (path: string, folder: boolean) => {
+    setSaved("");
     setView({ path, folder, position: folder ? 0 : 1 });
     setLine("1");
   };
@@ -114,6 +117,7 @@ function FileBrowser({
         project={project}
         folder={view.folder ? view.path : view.path.split("/").slice(0, -1).join("/")}
         open={(hit) => {
+          setSaved("");
           setView({
             path: hit.path,
             folder: false,
@@ -124,6 +128,21 @@ function FileBrowser({
           setLine(String(hit.line));
         }}
       />
+      {project.writable && result && (result.dir || result.file) && (
+        <FileWrite
+          key={`${view.path}:${result.file?.version ?? "directory"}`}
+          token={token}
+          project={project}
+          path={view.path}
+          session={current?.id}
+          version={result.file?.version ?? null}
+          saved={(p) => {
+            enter(p, false);
+            setSaved(p);
+          }}
+        />
+      )}
+      {saved === view.path && saved && <output>저장했습니다.</output>}
       {!result && <output>불러오는 중…</output>}
       {result?.error && (
         <>
@@ -175,6 +194,9 @@ function FileBrowser({
           </small>
           {view.excerpt && result.file.clipped && <p>검색 일치 부분 · {view.excerpt}</p>}
           <pre>{result.file.text}</pre>
+          {view.path.split("/").at(-1)?.toLowerCase() === "index.md" && (
+            <IndexLinks path={view.path} text={result.file.text} open={(p) => enter(p, false)} />
+          )}
           {current && result.file.total > 0 && (
             <AttachLines
               key={`${current.id}:${view.path}:${result.file.start}:${result.file.version}`}
@@ -223,6 +245,36 @@ function FileBrowser({
     </section>
   );
 }
+function IndexLinks({ path, text, open }: { path: string; text: string; open: (p: string) => void }) {
+  const links = new Map<string, string>();
+  for (const match of text.matchAll(/(?:^|[^!])\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
+    const target = match[2]?.split("#")[0];
+    if (!target || /[:\\]/.test(target) || target.startsWith("/")) continue;
+    const parts = path.split("/").slice(0, -1);
+    let valid = true;
+    for (const p of target.split("/")) {
+      if (p === "..") {
+        if (!parts.length) {
+          valid = false;
+          break;
+        }
+        parts.pop();
+      } else if (p && p !== ".") parts.push(p);
+    }
+    if (valid && parts.length) links.set(parts.join("/"), match[1] ?? target);
+  }
+  return (
+    links.size > 0 && (
+      <section className="index-links" aria-label="안내도 링크">
+        {[...links].map(([p, label]) => (
+          <button type="button" key={p} onClick={() => open(p)}>
+            {label} · {p}
+          </button>
+        ))}
+      </section>
+    )
+  );
+}
 function ProjectFolder({
   current,
   token,
@@ -235,13 +287,18 @@ function ProjectFolder({
   current: Session | undefined;
 }) {
   const [path, setPath] = useState(project.root ?? "");
+  const [writable, setWritable] = useState(Boolean(project.writable));
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   async function link(path: string | null) {
     setBusy(true);
     setError("");
     try {
-      await api(token, `/api/projects/${project.id}/root`, "PUT", { path, previous: project.root });
+      await api(token, `/api/projects/${project.id}/root`, "PUT", {
+        path,
+        previous: project.root,
+        writable: path !== null && writable,
+      });
       await refresh(project.id);
     } catch (e) {
       setError(message(e));
@@ -268,8 +325,12 @@ function ProjectFolder({
             작업 폴더 절대 경로
             <input required value={path} onChange={(e) => setPath(e.target.value)} />
           </label>
+          <label className="match-case">
+            <input type="checkbox" checked={writable} onChange={(e) => setWritable(e.target.checked)} />
+            승인형 저장 허용
+          </label>
           <button type="submit" disabled={busy || !path.trim()}>
-            읽기 전용 연결
+            {writable ? "승인형 저장으로 연결" : "읽기 전용 연결"}
           </button>
           {project.root && (
             <button disabled={busy} type="button" onClick={() => void link(null)}>

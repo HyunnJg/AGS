@@ -71,12 +71,15 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 |---|---|
 | `GET /api/projects` | 프로젝트와 섹션 목록. 프로젝트에는 연결한 서버 폴더의 절대 경로 또는 null을 포함한다. |
 | `POST /api/projects`, `POST /api/projects/{id}/sections` | `{name}`으로 생성하고 `{id}`를 반환한다. 프로젝트와 기본 ‘일반’ 섹션은 함께 생성한다. |
-| `PUT /api/projects/{id}/root` | `{path,previous}`로 로컬 폴더를 연결한다. path가 null이면 연결을 해제하고, 기존 경로가 previous와 다르면 409를 반환한다. |
+| `PUT /api/projects/{id}/root` | `{path,previous,writable?}`로 로컬 폴더를 연결한다. writable의 기본값은 false이고 매 연결마다 기존 수정안은 만료된다. path가 null이면 연결을 해제하고, 기존 경로가 previous와 다르면 409를 반환한다. |
 | `POST /api/projects/{id}/entries` | `{path,offset?}`으로 목록을 최대 100개와 다음 offset으로 반환한다. path는 등록 폴더 기준이며 빈 문자열은 최상위다. |
 | `POST /api/projects/{id}/attach` | `{session,root,path,version,start,end}`로 사용자가 확인한 줄 범위를 대화에 첨부한다. file 응답의 version이 현재 텍스트와 달라지면 409다. 최대 80줄·6,000자이고 화면에서 잘린 줄은 제외해야 한다. 같은 대화·프로젝트·경로·버전·범위의 재요청은 같은 id를 반환한다. |
 | `GET /api/sessions/{id}/references` | 해당 대화에 저장한 발췌 목록과 본문을 반환한다. 대화마다 8개까지 저장한다. |
 | `DELETE /api/sessions/{id}/references/{refId}` | 해당 대화에서 발췌를 빼고 남은 목록을 반환한다. |
-| `GET /api/projects/{id}/activity` | 프로젝트의 최근 파일 조회 활동 최대 100건을 최신순으로 반환한다. time은 Unix 밀리초다. 완료한 요청에는 action·상대 path·해당 시 start/end 줄, 실패한 요청에는 action·오류 코드가 남는다. 검색어·발췌·본문은 저장하지 않는다. |
+| `POST /api/projects/{id}/edit` | 승인형 연결에서 `{root,path,version}`으로 원본 전체 텍스트를 연다. version은 file 응답 값이다. |
+| `POST /api/projects/{id}/propose` | `{root,path,version,text}`로 승인 대기안을 만든다. 새 파일은 version이 null이다. 변경 시작 줄(first), removed, added와 수정안 id를 반환한다. |
+| `POST /api/projects/{id}/approve` | `{root,path,id,approved:true}`로 미리 본 변경을 저장한다. 원본이 달라지면 409다. 수정안은 최대 15분 동안 메모리에 보관하며 서버 재시작·폴더 재연결 후에는 다시 비교한다. |
+| `GET /api/projects/{id}/activity` | 프로젝트의 조회·생성·수정 활동 최대 100건을 최신순으로 반환한다. time은 Unix 밀리초다. 완료한 요청에는 action·상대 path·해당 시 start/end 줄, 실패한 요청에는 action·오류 코드가 남는다. 승인된 수정은 backup 필드에 직전 원본의 백업 파일명을 남긴다. 검색어·발췌·본문은 저장하지 않는다. |
 | `POST /api/projects/{id}/search` | `{path,query,root?,caseSensitive?}`로 하위 UTF-8 파일에서 1~120자의 한 줄 문구를 찾는다. hits에는 상대 경로·줄 번호·일치 주변 발췌·텍스트 버전이 포함된다. 기존 호출과의 호환을 위해 API는 caseSensitive 생략 시 true이며, 화면은 기본 false를 보낸다. files는 검색한 파일 수, skipped는 읽지 못해 건너뛴 항목 수다. |
 | `POST /api/projects/{id}/file` | `{path,start?}`로 1부터 시작하는 UTF-8 줄 범위를 읽는다. 검색 결과의 version을 함께 보내면 텍스트가 변경된 경우 409를 반환한다. 최대 1 MiB, 80줄이고 한 줄이 2,048자를 넘으면 clipped가 true다. |
 | `POST /api/sessions` | 기존 형식에 sectionId를 추가할 수 있다. sectionId만 전달하면 일반 새 대화와 같은 공급자 기본값을 쓴다. |
