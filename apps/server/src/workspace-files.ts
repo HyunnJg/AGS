@@ -45,14 +45,17 @@ export async function registerFolder(input: string, privateDir: string): Promise
     throw new WorkspaceError(400, "invalid_folder");
   const path = resolve(input);
   if (path === parse(path).root) deny();
+  const selected = await identity(path);
+  if (!selected.stat.isDirectory() || selected.stat.isSymbolicLink()) deny();
+  // Windows may expand an 8.3 ancestor name. Pin the actual directory, not the spelling.
   const canonical = await realpath(path);
-  if (relative(path, canonical) !== "") deny();
+  if (canonical === parse(canonical).root || /^[/\\]{2}/.test(canonical)) deny();
   if (privateDir) {
     const state = await realpath(privateDir);
-    if (sameOrBelow(path, state) || sameOrBelow(state, path)) deny();
+    if (sameOrBelow(canonical, state) || sameOrBelow(state, canonical)) deny();
   }
-  const { stat, id } = await identity(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) deny();
+  const { stat, id } = await identity(canonical);
+  if (!stat.isDirectory() || id !== selected.id) deny();
   return { path: canonical, identity: id };
 }
 async function locate(root: RegisteredRoot, path: string) {
