@@ -11,6 +11,7 @@ const webRoot = new URL(
 const assets = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"] as const],
   ["/app.js", ["app.js", "application/javascript"] as const],
+  ["/display-worker.js", ["display-worker.js", "application/javascript"] as const],
   ["/app.css", ["app.css", "text/css; charset=utf-8"] as const],
 ]);
 

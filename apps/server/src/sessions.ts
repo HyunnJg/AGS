@@ -1,3 +1,4 @@
+import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
 import {
   defaultOrder,
   emptySources,
@@ -36,6 +37,8 @@ export class SessionStore {
         CREATE TABLE IF NOT EXISTS shared_prompt (id INTEGER PRIMARY KEY CHECK(id=1), prompt TEXT NOT NULL);
         INSERT OR IGNORE INTO shared_prompt(id,prompt) VALUES(1,'');
         CREATE TABLE IF NOT EXISTS prompt_layout(id INTEGER PRIMARY KEY CHECK(id=1),block_order TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS display_settings (id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,rules TEXT NOT NULL);
+        INSERT OR IGNORE INTO display_settings VALUES(1,0,'[]');
         CREATE TABLE IF NOT EXISTS session_sources(session_id TEXT PRIMARY KEY REFERENCES sessions(id),memory TEXT NOT NULL,retrieval TEXT NOT NULL,revision INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS favorite_models (provider TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(provider,model));
         CREATE INDEX IF NOT EXISTS turns_by_session ON turns(session_id);
@@ -57,6 +60,17 @@ export class SessionStore {
     }
   }
 
+  displaySettings(): DisplaySettings {
+    const row = this.db.prepare("SELECT revision,rules FROM display_settings WHERE id=1").get();
+    return { revision: Number(row?.revision), rules: JSON.parse(String(row?.rules)) };
+  }
+  setDisplayRules(revision: number, rules: DisplayRule[]) {
+    return (
+      this.db
+        .prepare("UPDATE display_settings SET revision=revision+1,rules=? WHERE id=1 AND revision=?")
+        .run(JSON.stringify(rules), revision).changes === 1
+    );
+  }
   favorites() {
     return this.db
       .prepare("SELECT provider,model FROM favorite_models ORDER BY provider,model")

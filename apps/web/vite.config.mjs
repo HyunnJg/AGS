@@ -4,5 +4,6 @@ export default defineConfig({
     outDir: "../../dist/web", emptyOutDir: true,
     rollupOptions: { output: { entryFileNames: "app.js", assetFileNames: "app.[ext]" } },
   },
+  worker: {rollupOptions:{output:{entryFileNames:"display-worker.js"}}},
   esbuild: { jsx: "automatic" },
 });

@@ -1,3 +1,4 @@
+import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
 import { assembleContext } from "./context.ts";
 import { type ContextLimits, isLimits, maxPromptLength } from "../../../packages/contracts/src/context.ts";
@@ -124,6 +125,25 @@ export function createChatServer(
       } catch {
         throw new RequestError(502, "catalog_unavailable");
       }
+    }
+    if (path === "/api/settings/display-rules" && store) {
+      if (req.method === "GET") return json(store.displaySettings());
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const body = await readBody(req);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("revision" in body) ||
+        typeof body.revision !== "number" ||
+        !Number.isSafeInteger(body.revision) ||
+        body.revision < 0 ||
+        !("rules" in body) ||
+        ruleError(body.rules)
+      )
+        throw new RequestError(400, "invalid_rules");
+      if (!store.setDisplayRules(body.revision, body.rules as DisplayRule[]))
+        throw new RequestError(409, "settings_changed");
+      return json(store.displaySettings());
     }
     if (path === "/api/settings/prompt" && store) {
       if (req.method === "GET") return json(store.promptSettings());

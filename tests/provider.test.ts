@@ -96,6 +96,27 @@ test(
     await call(path, "PATCH", { provider: "custom", model: "fixture/model" });
     const send = (message: string) => call(`${path}/chat`, "POST", { message });
     assert.match(await (await send("first")).text(), /event: done/);
+    const displayPath = "/api/settings/display-rules";
+    const rule = {
+      id: "label",
+      name: "표시",
+      pattern: "한글",
+      flags: "g",
+      replacement: "화면용",
+      enabled: true,
+    };
+    const update = { revision: 0, rules: [rule] };
+    assert.deepEqual(await (await call(displayPath, "GET")).json(), {
+      revision: 0,
+      rules: [],
+    });
+    assert.equal((await call(displayPath, "PUT", update)).status, 200);
+    assert.equal((await call(displayPath, "PUT", update)).status, 409);
+    assert.equal((await call(displayPath, "PUT", { revision: 1, rules: [rule, rule] })).status, 400);
+    assert.deepEqual(await (await call(displayPath, "GET")).json(), {
+      revision: 1,
+      rules: [rule],
+    });
     assert.match(await (await send("next")).text(), /한글/);
     const last = requests.at(-1);
     assert.equal(last?.model, "fixture/model");
