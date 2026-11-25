@@ -17,6 +17,7 @@ export interface DirectoryPage {
   next: number | null;
 }
 export interface FilePage {
+  version: string;
   start: number;
   end: number;
   total: number;
@@ -37,7 +38,7 @@ export interface WorkspaceSearch {
   limited: boolean;
 }
 
-export type FileAction = "entries" | "file" | "search";
+export type FileAction = "entries" | "file" | "search" | "attach";
 export interface FileActivity {
   id: number;
   time: number;
@@ -47,3 +48,14 @@ export interface FileActivity {
   end: number | null;
   error: string | null;
 }
+
+export interface FileReference {
+  id: string;
+  project: string;
+  path: string;
+  start: number;
+  end: number;
+  text: string;
+}
+export const maxReferenceChars = 6000;
+export const maxReferences = 8;

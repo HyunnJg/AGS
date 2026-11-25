@@ -27,7 +27,15 @@ test("등록 폴더의 목록·UTF-8 줄 범위와 파일 형식을 확인한다
   assert.deepEqual(listing.entries[0], { name: "자료", kind: "folder" });
   assert.equal((await readLines(root, "자료/INDEX.md", 1)).end, 80);
   const last = await readLines(root, "자료/INDEX.md", 89);
-  assert.deepEqual(last, { start: 89, end: 90, total: 90, clipped: false, text: "항목 89\n항목 90" });
+  assert.match(last.version, /^[a-f0-9]{64}$/);
+  assert.deepEqual(last, {
+    version: last.version,
+    start: 89,
+    end: 90,
+    total: 90,
+    clipped: false,
+    text: "항목 89\n항목 90",
+  });
   assert.equal((await readLines(root, "빈 파일", 1)).total, 0);
   await assert.rejects(readLines(root, "binary", 1), /not_text/);
   await assert.rejects(readLines(root, "자료/INDEX.md", 91), /invalid_range/);

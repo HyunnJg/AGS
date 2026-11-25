@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { FileActivity } from "../../../packages/contracts/src/workspace.ts";
 import { api, fileActivityError } from "./api.ts";
 
-const labels = { entries: "폴더 탐색", file: "파일 읽기", search: "본문 검색" };
+const labels = { entries: "폴더 탐색", file: "파일 읽기", search: "본문 검색", attach: "대화에 첨부" };
 export function WorkspaceActivity({ token, project }: { token: string; project: string }) {
   const [rows, setRows] = useState<FileActivity[]>();
   const [error, setError] = useState("");

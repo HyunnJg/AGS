@@ -158,6 +158,9 @@ test(
       ).status,
       200,
     );
+    const projectId = store.addProject("참고 문서");
+    const ref = store.addReference(a.id, projectId, "notes.md", "a".repeat(64), 2, 2, "선택한 줄");
+    assert.ok(ref);
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
@@ -167,6 +170,7 @@ test(
       [
         "다음",
         "검색·임베딩 자료 (참고 자료)\n검토 자료",
+        "첨부 파일 (참고 자료) · 참고 문서 / notes.md · 2–2줄\n선택한 줄",
         "next",
         "한글",
         "장기기억 (참고 자료)\n유지할 메모",
@@ -176,6 +180,7 @@ test(
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);
+    store.removeReference(a.id, ref);
     const before = store.turns(a.id).length;
     await call(`${path}/context`, "PUT", { ...limits, inputBudget: 1 });
     assert.equal((await send("큰 입력")).status, 422);

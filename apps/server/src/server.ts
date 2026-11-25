@@ -86,6 +86,7 @@ export function createChatServer(
       providers.contextWindow(session.provider, session.model) ?? null,
       shared.order,
       db.sources(session.id),
+      db.references(session.id),
     );
   }
 
@@ -225,6 +226,15 @@ export function createChatServer(
         return json(store.create(isModelSelection(selection) ? selection : undefined, sectionId), 201);
       }
       return allow("GET, POST");
+    }
+    const references = /^\/api\/sessions\/([a-f0-9-]{36})\/references(?:\/([a-f0-9-]{36}))?$/.exec(path);
+    if (references && store) {
+      const sessionId = references[1] as string;
+      if (!store.get(sessionId)) throw new RequestError(404, "unknown_session");
+      if (!references[2]) return req.method === "GET" ? json(store.references(sessionId)) : allow("GET");
+      if (req.method !== "DELETE") return allow("DELETE");
+      store.removeReference(sessionId, references[2]);
+      return json(store.references(sessionId));
     }
     const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/sources)?$/.exec(
       path,
@@ -428,7 +438,8 @@ export function createChatServer(
     handle(req, res).catch((err: unknown) => {
       if (res.destroyed) return;
       if (res.headersSent) return res.destroy();
-      if (err instanceof RequestError || err instanceof WorkspaceError) rejectRequest(res, err.status, err.message);
+      if (err instanceof RequestError || err instanceof WorkspaceError)
+        rejectRequest(res, err.status, err.message);
       else rejectRequest(res, 500, "internal_error");
     });
   });

@@ -354,6 +354,35 @@ test(
     const chat = page.getByLabel("메시지");
     await panel.getByRole("button", { name: "INDEX.md", exact: true }).click();
     await panel.getByText("1–80 / 83줄").waitFor();
+    const sessionId = await page.evaluate(() => sessionStorage.getItem("ags-session"));
+    const refPath = `${base}/api/sessions/${sessionId}/references`;
+    const refs = async () => await (await page.request.get(refPath, { headers })).json();
+    assert.deepEqual(await refs(), []);
+    await panel.getByLabel("첨부 시작 줄").fill("2");
+    await panel.getByLabel("첨부 끝 줄").fill("3");
+    await panel.getByRole("button", { name: "현재 대화에 첨부" }).click();
+    await panel.getByText("2–3줄을 첨부했습니다.", { exact: true }).waitFor();
+    assert.deepEqual(
+      (await refs()).map((r) => [r.path, r.start, r.end, r.text]),
+      [["INDEX.md", 2, 3, "근거 1\n근거 2"]],
+    );
+    await page.getByText("첨부 자료 1개", { exact: true }).click();
+    await page.locator(".attached-references pre").filter({ hasText: "근거 2" }).waitFor();
+    const previewRefs = async () =>
+      await (
+        await page.request.post(`${base}/api/sessions/${sessionId}/context-preview`, {
+          headers,
+          data: { message: "자료 확인", limits: { turns: 0, inputBudget: null, outputBudget: null } },
+        })
+      ).json();
+    assert.ok(
+      (await previewRefs()).messages.some((m) => m.role === "user" && m.content.endsWith("근거 1\n근거 2")),
+    );
+    // The file moved on after preview. A fresh attachment needs a fresh version, while the earlier snapshot stays intact.
+    await writeFile(join(folder, "INDEX.md"), `변경된 줄\n${notes}`);
+    await panel.getByRole("button", { name: "현재 대화에 첨부" }).click();
+    await panel.getByRole("button", { name: "최신 파일 다시 열기" }).waitFor();
+    assert.equal((await refs()).length, 1);
     await chat.fill("옆에서 자료 확인");
     await page.getByRole("button", { name: /^전송/ }).click();
     await page.getByText("[mock] 수신한 메시지: 옆에서 자료 확인", { exact: true }).waitFor();
@@ -362,6 +391,22 @@ test(
     const panelBox = await panel.boundingBox(),
       chatBox = await chat.boundingBox();
     assert.ok(panelBox && chatBox && panelBox.x >= chatBox.x + chatBox.width);
+    await page
+      .getByRole("navigation", { name: "대화 목록" })
+      .getByRole("button", { name: "첫 작업", exact: true })
+      .click();
+    await page.getByText(original, { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("섹션 선택").locator("option:checked").innerText(), "사료 검토");
+    assert.equal(await page.getByText("첨부 자료 1개", { exact: true }).count(), 0);
+    await page
+      .getByRole("navigation", { name: "대화 목록" })
+      .getByRole("button", { name: "연표 확인", exact: true })
+      .click();
+    await page.getByText("첨부 자료 1개", { exact: true }).click();
+    await page.getByRole("button", { name: "첨부 빼기" }).click();
+    await page.getByText("첨부 자료 1개", { exact: true }).waitFor({ state: "hidden" });
+    assert.deepEqual(await refs(), []);
+    assert.ok(!(await previewRefs()).messages.some((m) => m.content.includes("첨부 파일")));
     await panel.getByRole("button", { name: "활동 기록", exact: true }).click();
     await panel.getByText("INDEX.md · 83–83줄", { exact: true }).waitFor();
     const history = await (await page.request.get(`${projectPath}/activity`, { headers })).json();

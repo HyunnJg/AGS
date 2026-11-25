@@ -157,18 +157,21 @@ export async function readLines(
   path: string,
   start: number,
   version?: string,
+  count = 80,
 ): Promise<FilePage> {
   const text = await readText(root, path);
-  if (version && versionOf(text) !== version) throw new WorkspaceError(409, "search_result_changed");
+  const currentVersion = versionOf(text);
+  if (version && currentVersion !== version) throw new WorkspaceError(409, "search_result_changed");
   const lines = text.split(/\r\n|\n|\r/);
   if (lines.at(-1) === "") lines.pop();
   if (start > Math.max(1, lines.length)) throw new WorkspaceError(400, "invalid_range");
-  const page = lines.slice(start - 1, start + 79);
+  const page = lines.slice(start - 1, start - 1 + count);
   const clipped = page.some((line) => line.length > 2048);
   return {
     start,
     end: start - 1 + page.length,
     total: lines.length,
+    version: currentVersion,
     clipped,
     text: page.map((line) => line.slice(0, 2048)).join("\n"),
   };
