@@ -73,7 +73,10 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 | `POST /api/projects`, `POST /api/projects/{id}/sections` | `{name}`으로 생성하고 `{id}`를 반환한다. 프로젝트와 기본 ‘일반’ 섹션은 함께 생성한다. |
 | `PUT /api/projects/{id}/root` | `{path,previous}`로 로컬 폴더를 연결한다. path가 null이면 연결을 해제하고, 기존 경로가 previous와 다르면 409를 반환한다. |
 | `POST /api/projects/{id}/entries` | `{path,offset?}`으로 목록을 최대 100개와 다음 offset으로 반환한다. path는 등록 폴더 기준이며 빈 문자열은 최상위다. |
-| `POST /api/projects/{id}/file` | `{path,start?}`로 1부터 시작하는 UTF-8 줄 범위를 읽는다. 최대 1 MiB, 80줄이고 한 줄이 2,048자를 넘으면 clipped가 true다. |
+| `POST /api/projects/{id}/search` | `{path,query,root?}`로 하위 UTF-8 파일에서 대소문자를 구분해 1~120자의 한 줄 문구를 찾는다. hits에는 상대 경로·줄 번호·일치 주변 발췌·텍스트 버전이 포함된다. files는 검색한 파일 수, skipped는 읽지 못해 건너뛴 항목 수다. |
+| `POST /api/projects/{id}/file` | `{path,start?}`로 1부터 시작하는 UTF-8 줄 범위를 읽는다. 검색 결과의 version을 함께 보내면 텍스트가 변경된 경우 409를 반환한다. 최대 1 MiB, 80줄이고 한 줄이 2,048자를 넘으면 clipped가 true다. |
 | `POST /api/sessions` | 기존 형식에 sectionId를 추가할 수 있다. sectionId만 전달하면 일반 새 대화와 같은 공급자 기본값을 쓴다. |
 
 목록과 파일 읽기 요청에도 화면에서 확인한 root를 함께 보낼 수 있다. 연결이 바뀌면 409를 반환한다. 링크, 장치 파일, 운영체제의 최상위 폴더, 서버 비공개 상태 폴더와 겹치는 루트는 파일 도구의 범위에서 제외한다. 모델에는 파일 도구나 미리보기 본문이 전달되지 않는다.
+
+검색은 요청당 최대 1,500개 디렉터리 항목, 파일 읽기 시도 200개, 파일 본문 합계 8 MiB, 일치한 줄 50개로 제한한다. 한도 때문에 탐색이 일찍 끝나면 limited가 true다. `.git`, `node_modules`, `dist` 디렉터리와 링크는 탐색에서 제외한다.

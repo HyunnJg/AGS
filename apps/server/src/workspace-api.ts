@@ -1,6 +1,12 @@
 import type { IncomingMessage } from "node:http";
 import type { SessionStore } from "./sessions.ts";
-import { WorkspaceError, listEntries, readLines, registerFolder } from "./workspace-files.ts";
+import {
+  WorkspaceError,
+  listEntries,
+  readLines,
+  registerFolder,
+  searchWorkspace,
+} from "./workspace-files.ts";
 
 type Json = (value: unknown, status?: number) => void;
 export async function workspaceApi(
@@ -12,7 +18,7 @@ export async function workspaceApi(
   json: Json,
   allow: (methods: string) => void,
 ) {
-  const route = /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file))?$/.exec(path);
+  const route = /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search))?$/.exec(path);
   if (!route) throw new WorkspaceError(404, "unknown_route");
   const [, id, action] = route;
   if (!id && req.method === "GET") return json(store.catalog());
@@ -47,14 +53,36 @@ export async function workspaceApi(
       throw new WorkspaceError(400, "invalid_path");
     if ("root" in body && body.root !== project.root) throw new WorkspaceError(409, "folder_changed");
     const root = { path: project.root, identity: project.identity };
+    const checkActive = () => {
+      if (req.socket.destroyed) throw new WorkspaceError(409, "search_cancelled");
+      const current = store.project(id);
+      if (current?.root !== root.path || current.identity !== root.identity)
+        throw new WorkspaceError(409, "folder_changed");
+    };
+    if (action === "search") {
+      if (
+        !("query" in body) ||
+        typeof body.query !== "string" ||
+        !body.query.trim() ||
+        body.query.length > 120 ||
+        /[\r\n]/.test(body.query)
+      )
+        throw new WorkspaceError(400, "invalid_search");
+      const result = await searchWorkspace(root, body.path, body.query, checkActive);
+      checkActive();
+      return json(result);
+    }
     const listing = action === "entries";
     const n = listing ? ("offset" in body ? body.offset : 0) : "start" in body ? body.start : 1;
     if (typeof n !== "number" || !Number.isSafeInteger(n) || n < (listing ? 0 : 1))
       throw new WorkspaceError(400, "invalid_range");
-    const result = listing ? await listEntries(root, body.path, n) : await readLines(root, body.path, n);
-    const current = store.project(id);
-    if (current?.root !== root.path || current.identity !== root.identity)
-      throw new WorkspaceError(409, "folder_changed");
+    const version = "version" in body ? body.version : undefined;
+    if (version !== undefined && (typeof version !== "string" || !/^[a-f0-9]{64}$/.test(version)))
+      throw new WorkspaceError(400, "invalid_version");
+    const result = listing
+      ? await listEntries(root, body.path, n)
+      : await readLines(root, body.path, n, version);
+    checkActive();
     return json(result);
   } catch (e) {
     if (e instanceof WorkspaceError) throw e;

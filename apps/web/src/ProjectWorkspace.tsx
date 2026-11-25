@@ -1,3 +1,4 @@
+import { WorkspaceSearch } from "./WorkspaceSearch.tsx";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   DirectoryPage,
@@ -42,7 +43,7 @@ function NameForm({ label, save }: { label: string; save: (name: string) => Prom
     </form>
   );
 }
-type View = { path: string; folder: boolean; position: number };
+type View = { path: string; folder: boolean; position: number; version?: string; excerpt?: string };
 const top: View = { path: "", folder: true, position: 0 };
 function FileBrowser({ token, project }: { token: string; project: Project }) {
   const [view, setView] = useState(top);
@@ -54,7 +55,7 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
     api(token, `/api/projects/${project.id}/${key}`, "POST", {
       root: project.root,
       path: view.path,
-      ...(view.folder ? { offset: view.position } : { start: view.position }),
+      ...(view.folder ? { offset: view.position } : { start: view.position, version: view.version }),
     })
       .then((r) => r.json())
       .then((result) => {
@@ -74,7 +75,12 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
     setLine("1");
   };
   const jump = (position: number) => {
-    setView({ ...view, position });
+    setView({
+      path: view.path,
+      folder: view.folder,
+      position,
+      ...(view.version && { version: view.version }),
+    });
     setLine(String(position));
   };
   return (
@@ -87,6 +93,21 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
           </button>
         )}
       </header>
+      <WorkspaceSearch
+        token={token}
+        project={project}
+        folder={view.folder ? view.path : view.path.split("/").slice(0, -1).join("/")}
+        open={(hit) => {
+          setView({
+            path: hit.path,
+            folder: false,
+            position: hit.line,
+            version: hit.version,
+            excerpt: hit.excerpt,
+          });
+          setLine(String(hit.line));
+        }}
+      />
       {!result && <output>불러오는 중…</output>}
       {result?.error && (
         <>
@@ -131,6 +152,7 @@ function FileBrowser({ token, project }: { token: string; project: Project }) {
               ? `${result.file.start}–${result.file.end} / ${result.file.total}줄`
               : "빈 파일"}
           </small>
+          {view.excerpt && result.file.clipped && <p>검색 일치 부분 · {view.excerpt}</p>}
           <pre>{result.file.text}</pre>
           {result.file.clipped && <small>긴 줄은 앞 2,048자까지 표시합니다.</small>}
           {result.file.total > 0 && (
@@ -200,7 +222,12 @@ function ProjectFolder({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void link(path);
+            const trimmed = path.trim();
+            const cleaned =
+              trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
+                ? trimmed.slice(1, -1)
+                : trimmed;
+            void link(cleaned);
           }}
         >
           <label>

@@ -300,13 +300,27 @@ test(
         (s) => s.selectedOptions[0]?.text === "사료 검토",
       ),
     );
-    await page.getByLabel("작업 폴더 절대 경로").fill(folder);
+    await page.getByLabel("작업 폴더 절대 경로").fill(`  "${folder}"  `);
     await page.getByRole("button", { name: "읽기 전용 연결" }).click();
     await page.getByRole("button", { name: "INDEX.md" }).click();
     await page.getByText("1–80 / 82줄").waitFor();
     await page.getByRole("button", { name: "다음 줄" }).click();
     await page.getByText("81–82 / 82줄").waitFor();
     assert.equal(await page.locator(".file-browser pre").innerText(), "근거 81\n근거 82");
+    await page.getByText("파일 내용 검색", { exact: true }).click();
+    await page.getByLabel("검색 문구").fill("근거 82");
+    await page.getByRole("button", { name: "검색", exact: true }).click();
+    await page.getByRole("button", { name: /INDEX.md · 82줄/ }).click();
+    await page.getByText("82–82 / 82줄").waitFor();
+    assert.equal(await page.locator(".file-browser pre").innerText(), "근거 82");
+    await writeFile(join(folder, "INDEX.md"), `추가한 첫 줄\n${notes}`);
+    await page.getByText("파일 내용 검색", { exact: true }).click();
+    await page.getByRole("button", { name: /INDEX.md · 82줄/ }).click();
+    await page.getByText(/검색 후 원본이 변경됐습니다/).waitFor();
+    await page.getByText("파일 내용 검색", { exact: true }).click();
+    await page.getByRole("button", { name: "검색", exact: true }).click();
+    await page.getByRole("button", { name: /INDEX.md · 83줄/ }).click();
+    await page.getByText("83–83 / 83줄").waitFor();
     await page.getByRole("button", { name: "섹션에서 새 대화" }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
     await page.getByText("역사 자료 / 사료 검토", { exact: true }).waitFor();
@@ -329,6 +343,14 @@ test(
     const headers = { authorization: `Bearer ${token}` };
     const noToken = await page.request.post(`${projectPath}/entries`, { data: { path: "" } });
     assert.equal(noToken.status(), 401);
+    const searchData = { path: "", query: "근거" };
+    assert.equal((await page.request.post(`${projectPath}/search`, { data: searchData })).status(), 401);
+    assert.equal(
+      (
+        await page.request.post(`${projectPath}/search`, { headers, data: { path: "", query: " " } })
+      ).status(),
+      400,
+    );
     const stale = await page.request.put(`${projectPath}/root`, {
       headers,
       data: { path: null, previous: null },
@@ -342,6 +364,10 @@ test(
       data: { path: "INDEX.md" },
     });
     assert.equal(disconnected.status(), 409);
+    assert.equal(
+      (await page.request.post(`${projectPath}/search`, { headers, data: searchData })).status(),
+      409,
+    );
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "첫 작업", exact: true }).click();
     await page.getByText(original, { exact: true }).waitFor();

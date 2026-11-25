@@ -701,3 +701,6 @@ header h2 {
 
 .conversation-title { min-width: 0; }
 .conversation-title small { display: block; color: #53665a; overflow-wrap: anywhere; }
+
+.workspace-search { padding-bottom: .5rem; border-bottom: 1px solid #d5ddd4; }
+.workspace-search li span { display: block; color: #53665a; white-space: pre-wrap; }
