@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -248,8 +248,8 @@ test(
     await page.reload();
     await page.getByText(displayed, { exact: true }).waitFor();
     const id = await page.evaluate(() => sessionStorage.getItem("ags-session"));
-    const preview = await page.request.post(base + "/api/sessions/" + id + "/context-preview", {
-      headers: { authorization: "Bearer " + token },
+    const preview = await page.request.post(`${base}/api/sessions/${id}/context-preview`, {
+      headers: { authorization: `Bearer ${token}` },
       data: {
         message: "원문 확인",
         limits: { turns: 1, inputBudget: null, outputBudget: null },
@@ -269,7 +269,10 @@ test(
       };
     });
     await page.reload();
-    await page.getByText(/실행 시간을 초과했습니다/).first().waitFor();
+    await page
+      .getByText(/실행 시간을 초과했습니다/)
+      .first()
+      .waitFor();
     await page.getByText(original, { exact: true }).waitFor();
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await page.getByRole("button", { name: "정규식", exact: true }).click();
@@ -280,6 +283,67 @@ test(
     await page.getByRole("button", { name: "규칙 저장" }).click();
     await disabledRule;
     await page.keyboard.press("Escape");
+    await page.getByText(original, { exact: true }).waitFor();
+    const folder = await mkdtemp(join(tmpdir(), "ags-project-ui-"));
+    t.after(() => rm(folder, { recursive: true, force: true }));
+    const notes = Array.from({ length: 82 }, (_, i) => `근거 ${i + 1}`).join("\n");
+    await writeFile(join(folder, "INDEX.md"), notes);
+    const openWorkspace = () => page.getByRole("button", { name: "프로젝트 · 파일" }).click();
+    await openWorkspace();
+    await page.getByLabel("프로젝트 이름").fill("역사 자료");
+    await page.getByRole("button", { name: "프로젝트 만들기" }).click();
+    await page.getByText("새 섹션", { exact: true }).click();
+    await page.getByLabel("섹션 이름").fill("사료 검토");
+    await page.getByRole("button", { name: "섹션 만들기" }).click();
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll("dialog select")).some(
+        (s) => s.selectedOptions[0]?.text === "사료 검토",
+      ),
+    );
+    await page.getByLabel("작업 폴더 절대 경로").fill(folder);
+    await page.getByRole("button", { name: "읽기 전용 연결" }).click();
+    await page.getByRole("button", { name: "INDEX.md" }).click();
+    await page.getByText("1–80 / 82줄").waitFor();
+    await page.getByRole("button", { name: "다음 줄" }).click();
+    await page.getByText("81–82 / 82줄").waitFor();
+    assert.equal(await page.locator(".file-browser pre").innerText(), "근거 81\n근거 82");
+    await page.getByRole("button", { name: "섹션에서 새 대화" }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await page.getByText("역사 자료 / 사료 검토", { exact: true }).waitFor();
+    await page.getByLabel("메시지").fill("연표 확인");
+    await page.getByRole("button", { name: "전송" }).click();
+    await page.getByText("[mock] 수신한 메시지: 연표 확인", { exact: true }).waitFor();
+    await stop();
+    await start(new URL(base).port);
+    await page.reload();
+    await openWorkspace();
+    await page.getByRole("dialog").getByRole("button", { name: "연표 확인" }).waitFor();
+    assert.equal(await page.getByLabel("섹션 선택").locator("option:checked").innerText(), "사료 검토");
+    await page.getByRole("button", { name: "INDEX.md" }).waitFor();
+    assert.equal(
+      await page.getByRole("dialog").getByRole("button", { name: "첫 작업", exact: true }).count(),
+      0,
+    );
+    const projectId = await page.getByLabel("프로젝트 선택").inputValue();
+    const projectPath = `${base}/api/projects/${projectId}`;
+    const headers = { authorization: `Bearer ${token}` };
+    const noToken = await page.request.post(`${projectPath}/entries`, { data: { path: "" } });
+    assert.equal(noToken.status(), 401);
+    const stale = await page.request.put(`${projectPath}/root`, {
+      headers,
+      data: { path: null, previous: null },
+    });
+    assert.equal(stale.status(), 409);
+    await page.getByText("연결 폴더 변경", { exact: true }).click();
+    await page.getByRole("button", { name: "연결 해제" }).click();
+    await page.getByRole("button", { name: "INDEX.md" }).waitFor({ state: "hidden" });
+    const disconnected = await page.request.post(`${projectPath}/file`, {
+      headers,
+      data: { path: "INDEX.md" },
+    });
+    assert.equal(disconnected.status(), 409);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "첫 작업", exact: true }).click();
     await page.getByText(original, { exact: true }).waitFor();
     assert.deepEqual(pageErrors, []);
   },

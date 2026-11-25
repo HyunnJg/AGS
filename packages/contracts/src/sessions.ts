@@ -7,6 +7,8 @@ export function isPreset(value: unknown): value is Preset {
 }
 
 export interface Session extends ModelSelection {
+  sectionId?: string | null;
+  sectionLabel?: string | null;
   id: string;
   title: string;
   preset: Preset;

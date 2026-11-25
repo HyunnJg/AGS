@@ -20,6 +20,20 @@ export async function api(token: string, path: string, method = "GET", value?: u
       window.dispatchEvent(new Event("ags-unauthorized"));
       throw new Error("로컬 인증 토큰을 확인해 주세요.");
     }
+    if (path.startsWith("/api/projects")) {
+      const messages: Record<string, string> = {
+        invalid_folder: "서버 PC에 있는 작업 폴더의 절대 경로를 입력하세요.",
+        outside_workspace: "이 경로는 열 수 없습니다. 실제 작업 폴더와 접근 권한을 확인하세요.",
+        path_unavailable: "경로를 찾을 수 없습니다. 폴더 연결과 파일 위치를 확인하세요.",
+        file_too_large: "1 MiB를 넘는 파일은 미리볼 수 없습니다.",
+        not_text: "UTF-8 텍스트 파일만 미리볼 수 있습니다.",
+        folder_changed: "연결 폴더가 바뀌었습니다. 작업공간을 다시 열어 주세요.",
+        file_changed: "읽는 동안 파일이 변경됐습니다. 다시 열어 주세요.",
+        invalid_range: "표시할 줄 범위를 확인하세요.",
+      };
+      const body = await res.json().catch(() => ({}));
+      throw new Error(messages[body.error] ?? `작업공간 요청을 완료하지 못했습니다 (HTTP ${res.status}).`);
+    }
     if (res.status === 422)
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",

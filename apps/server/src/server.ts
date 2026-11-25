@@ -1,3 +1,5 @@
+import { workspaceApi } from "./workspace-api.ts";
+import { WorkspaceError } from "./workspace-files.ts";
 import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
 import { assembleContext } from "./context.ts";
@@ -197,21 +199,30 @@ export function createChatServer(
       store.setFavorite(body, body.pinned);
       return json(store.favorites());
     }
+    if ((path === "/api/projects" || path.startsWith("/api/projects/")) && store)
+      return workspaceApi(path, req, store, stateDirectory, readBody, json, allow);
     if (path === "/api/sessions" && store) {
       if (req.method === "GET") return json(store.list());
       if (req.method === "POST") {
+        let sectionId: string | null = null;
         if (Number(req.headers["content-length"]) || req.headers["transfer-encoding"]) {
           const selection = await readBody(req);
-          if (
-            !isModelSelection(selection) ||
-            !providers.options.find((o) => o.id === selection.provider)?.enabled
-          )
+          if (selection && typeof selection === "object" && "sectionId" in selection) {
+            if (typeof selection.sectionId !== "string" || !store.sectionExists(selection.sectionId))
+              throw new RequestError(400, "invalid_section");
+            sectionId = selection.sectionId;
+          }
+          if (isModelSelection(selection)) {
+            if (!providers.options.find((o) => o.id === selection.provider)?.enabled)
+              throw new RequestError(400, "invalid_model");
+            return json(store.create(selection, sectionId), 201);
+          }
+          if (!sectionId || Object.keys(selection as object).length !== 1)
             throw new RequestError(400, "invalid_model");
-          return json(store.create(selection), 201);
         }
         const router = providers.options.find((o) => o.id === "openrouter" && o.enabled);
         const selection = { provider: "openrouter", model: router?.defaultModel };
-        return json(store.create(isModelSelection(selection) ? selection : undefined), 201);
+        return json(store.create(isModelSelection(selection) ? selection : undefined, sectionId), 201);
       }
       return allow("GET, POST");
     }
@@ -417,7 +428,7 @@ export function createChatServer(
     handle(req, res).catch((err: unknown) => {
       if (res.destroyed) return;
       if (res.headersSent) return res.destroy();
-      if (err instanceof RequestError) rejectRequest(res, err.status, err.message);
+      if (err instanceof RequestError || err instanceof WorkspaceError) rejectRequest(res, err.status, err.message);
       else rejectRequest(res, 500, "internal_error");
     });
   });

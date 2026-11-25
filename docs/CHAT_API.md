@@ -62,3 +62,18 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 ### 답변 표시 규칙
 
 인증된 `GET /api/settings/display-rules`는 작업실 공통 설정 `{revision,rules}`를 반환한다. 기본 규칙은 빈 배열이다. `PUT`으로 읽은 revision과 규칙 배열을 보내면 순서대로 저장하고 새 revision을 반환한다. 각 규칙은 `{id,name,enabled,pattern,flags,replacement}`로 구성한다. 문법 오류·중복 ID·개수 초과는 400, 동시 편집 충돌은 409다. 브라우저는 응답이 끝난 뒤 표시할 때만 치환한다.
+
+### 프로젝트와 읽기 전용 파일
+
+모든 경로는 로컬 토큰을 요구한다. 프로젝트와 섹션 ID는 서버가 발급한다.
+
+| 요청 | 동작 |
+|---|---|
+| `GET /api/projects` | 프로젝트와 섹션 목록. 프로젝트에는 연결한 서버 폴더의 절대 경로 또는 null을 포함한다. |
+| `POST /api/projects`, `POST /api/projects/{id}/sections` | `{name}`으로 생성하고 `{id}`를 반환한다. 프로젝트와 기본 ‘일반’ 섹션은 함께 생성한다. |
+| `PUT /api/projects/{id}/root` | `{path,previous}`로 로컬 폴더를 연결한다. path가 null이면 연결을 해제하고, 기존 경로가 previous와 다르면 409를 반환한다. |
+| `POST /api/projects/{id}/entries` | `{path,offset?}`으로 목록을 최대 100개와 다음 offset으로 반환한다. path는 등록 폴더 기준이며 빈 문자열은 최상위다. |
+| `POST /api/projects/{id}/file` | `{path,start?}`로 1부터 시작하는 UTF-8 줄 범위를 읽는다. 최대 1 MiB, 80줄이고 한 줄이 2,048자를 넘으면 clipped가 true다. |
+| `POST /api/sessions` | 기존 형식에 sectionId를 추가할 수 있다. sectionId만 전달하면 일반 새 대화와 같은 공급자 기본값을 쓴다. |
+
+목록과 파일 읽기 요청에도 화면에서 확인한 root를 함께 보낼 수 있다. 연결이 바뀌면 409를 반환한다. 링크, 장치 파일, 운영체제의 최상위 폴더, 서버 비공개 상태 폴더와 겹치는 루트는 파일 도구의 범위에서 제외한다. 모델에는 파일 도구나 미리보기 본문이 전달되지 않는다.
