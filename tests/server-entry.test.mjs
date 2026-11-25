@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import test from "node:test";
@@ -9,9 +12,10 @@ import { fileURLToPath } from "node:url";
 const entry = fileURLToPath(new URL("../dist/apps/server/src/main.js", import.meta.url));
 
 test("빌드한 서버가 loopback에 바인딩하고 비밀값을 출력하지 않는다", { timeout: 10_000 }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), "ags-entry-"));
   const token = randomBytes(32).toString("hex");
   const child = spawn(process.execPath, [entry], {
-    env: { ...process.env, AGS_PORT: "0", AGS_LOCAL_TOKEN: token },
+    env: { ...process.env, AGS_PORT: "0", AGS_STATE_DIR: dir, AGS_LOCAL_TOKEN: token },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const closed = once(child, "close");
@@ -21,6 +25,7 @@ test("빌드한 서버가 loopback에 바인딩하고 비밀값을 출력하지 
   t.after(async () => {
     child.kill();
     await closed;
+    await rm(dir, { recursive: true, force: true });
     assert.ok(!output.includes(token));
   });
   const lines = createInterface({ input: child.stdout });

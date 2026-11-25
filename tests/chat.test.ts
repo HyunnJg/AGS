@@ -5,6 +5,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { localPort } from "../apps/server/src/port.ts";
 import { createChatServer } from "../apps/server/src/server.ts";
 import type { ChatEvent } from "../packages/contracts/src/chat.ts";
 
@@ -164,4 +165,28 @@ test("잘못된 본문·메서드·경로에 구분 가능한 HTTP 오류를 반
   assert.equal((await fetch(url, { headers })).status, 405);
   assert.equal((await fetch(`${base}/missing`, { headers })).status, 404);
   assert.throws(() => createChatServer(""), /invalid_local_token/);
+});
+
+test("빈 포트 설정은 기본 포트를 사용하고 명시적인 0은 임의 포트를 선택한다", () => {
+  assert.equal(localPort("   "), 4317);
+  assert.equal(localPort(undefined), 4317);
+  assert.equal(localPort("0"), 0);
+  assert.throws(() => localPort("65536"));
+});
+
+test("로컬 Host 대소문자를 정규화하고 다른 포트의 Origin은 거부한다", async t => {
+  const { base, headers } = await fixture(t);
+  const host = `LOCALHOST:${new URL(base).port}`;
+  async function post(origin: string) {
+    return new Promise<number | undefined>((resolve, reject) => {
+      request(`${base}/api/chat`, {
+        method: "POST", headers: { ...headers, host, origin },
+      }, response => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on("error", reject).end(JSON.stringify({ message: "확인" }));
+    });
+  }
+  assert.equal(await post(`http://${host.toLowerCase()}`), 200);
+  assert.equal(await post("http://localhost:1"), 403);
 });
