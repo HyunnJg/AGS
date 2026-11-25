@@ -42,10 +42,19 @@
 
 인증된 GET /api/providers는 공급자 ID, 설정 여부와 기본 모델 ID를 반환한다. 세션 경로에 PATCH로 `{"provider":"custom","model":"my-model"}`을 보내면 다음 턴의 공급자와 모델을 바꾼다. 각 턴에는 시작 시 선택한 공급자와 모델이 기록된다. 기존 세션과 이력은 mock으로 복원한다.
 
-외부 공급자는 현재 프리셋 지침과 해당 세션의 최근 완료 턴 최대 12개, 현재 메시지를 받는다. 진행 중이거나 취소·실패한 턴은 제외한다. 동일 세션의 중복 요청은 409다. 401/403과 429는 각각 고정된 provider_auth와 provider_limit 스트림 오류로 변환한다. 로컬 접속 인증 실패는 기존 HTTP 401로 구분한다. 브라우저에서 주소와 API 키를 지정하는 경로는 없다.
+외부 공급자는 고정 규약·공용 지침·프리셋, 해당 세션의 예산 안에 들어오는 최근 완료 턴(기본 최대 12개), 현재 메시지를 받는다. 진행 중이거나 취소·실패한 턴은 제외한다. 동일 세션의 중복 요청은 409다. 401/403과 429는 각각 고정된 provider_auth와 provider_limit 스트림 오류로 변환한다. 로컬 접속 인증 실패는 기존 HTTP 401로 구분한다. 브라우저에서 주소와 API 키를 지정하는 경로는 없다.
 
 SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송하며, DB에는 150ms 또는 8KiB마다 모아 저장하고 모든 정상 종료·취소·오류 처리 시 남은 텍스트를 저장한다. 프로세스가 강제 종료되면 마지막 체크포인트 이후의 텍스트가 유실될 수 있다.
 
 ### 설정 센터
 
 인증된 `GET /api/providers/:id/models`는 설정된 공급자의 모델 ID, 이름, 제공된 경우 컨텍스트 길이를 반환한다. 정상 응답은 공급자별로 5분간 캐시한다. 조회 실패는 502이며 직접 모델 ID 적용은 계속 가능하다. `GET /api/settings/favorites`는 작업실의 고정 목록을 읽는다. `PUT`에 `{provider,model,pinned}`를 보내면 해당 항목만 변경한다. `GET /api/settings/runtime`은 유휴·전체 제한(ms)과 로컬 저장 폴더를 반환한다. 새 세션 생성 요청에 선택적으로 `{provider,model}`을 보내 첫 세션의 모델도 지정할 수 있다. 쓰기 실패 시 SSE 오류 코드는 `storage_failed`이다.
+
+### 컨텍스트와 공용 지침
+
+- `GET /api/sessions/{id}/context`와 `PUT`은 대화별 `{turns,inputBudget,outputBudget}`를 읽고 저장한다. 기존 대화의 기본값은 `{turns:12,inputBudget:null,outputBudget:null}`이다. 예산은 양의 정수이며 빈 한도는 null로 보낸다.
+- `POST /api/sessions/{id}/context-preview`는 `{message,limits}`를 받아 실제 전송과 동일한 조립 코드로 메시지를 생성한다. 공급자 호출이나 대화 기록 쓰기는 없다. 이전 턴은 사용자·응답 쌍 단위로 포함한다. 입력량은 메시지별 UTF-8 바이트 수 + 8로 추정하며 공급자 사용량과 다를 수 있다. 모델 목록에서 해당 모델의 컨텍스트 길이를 알고 있으면 그 범위에서 지정 출력량을 예약한다. 필수 입력이 예산을 넘으면 미리보기의 `fits`는 false이며 전송은 422로 거절한다. 출력 한도는 설정된 경우에만 `max_tokens`로 전달한다.
+- `GET /api/settings/prompt`는 `{prompt,order}`를 반환한다. `PUT`에 `{prompt,previous}`를 보내면 최대 4,000자의 전역 지침을 저장한다. 다른 창이 먼저 수정해 기존 값이 달라지면 409를 반환한다. 순서도 변경할 때는 기존 previous와 함께 order 및 previousOrder를 보낸다. memory, history, retrieval, input을 각각 한 번 포함해야 하며 지침과 순서는 함께 저장한다. 인증·접근 권한은 서버 측에서 별도로 검증한다.
+- `GET /api/sessions/{id}/sources`와 `PUT`은 세션별 수동 참고 자료 `{memory,retrieval,revision}`를 읽고 저장한다. 저장할 때 읽은 revision이 달라지면 409다. 각 자료는 최대 6,000자이다. 참고 자료는 user 역할로 전달하고, 완료 턴은 원래 역할로 전달한다.
+- 미리보기의 blocks는 messages와 같은 순서의 출처 목록이다. 고정 지침과 현재 입력의 예산을 먼저 확보하고 남은 예산을 설정 순서대로 사용한다. 빈 블록은 생략하며, excluded는 예산 때문에 일부 또는 전부 생략된 블록이다.
+- 모델 목록 GET에 `?refresh=1`을 붙이면 캐시 만료 전에도 공급자 목록을 다시 조회한다. 같은 공급자에 대한 동시 갱신은 하나의 요청을 공유한다.

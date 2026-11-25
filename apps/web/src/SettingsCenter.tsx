@@ -1,3 +1,6 @@
+import { SharedPrompt } from "./PromptLayout.tsx";
+import { ContextSettings } from "./ContextSettings.tsx";
+import type { Session } from "../../../packages/contracts/src/sessions.ts";
 import { useEffect, useRef, useState } from "react";
 import {
   isModelSelection,
@@ -27,11 +30,10 @@ function ModelList({
   const [attempt, retry] = useState(0);
   const [pinning, setPinning] = useState(true);
   const [pinError, setPinError] = useState("");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retry explicitly requests the catalog again.
   useEffect(() => {
     let current = true;
     setStatus("loading");
-    api(token, `/api/providers/${provider}/models`)
+    api(token, `/api/providers/${provider}/models${attempt ? "?refresh=1" : ""}`)
       .then((r) => r.json())
       .then((data) => {
         if (current) {
@@ -96,6 +98,11 @@ function ModelList({
           placeholder="이름 또는 모델 ID"
         />
       </label>
+      {status === "ready" && (
+        <button type="button" className="refresh-models" onClick={() => retry((n) => n + 1)}>
+          목록 새로고침
+        </button>
+      )}
       {status === "loading" && <output>목록을 불러오는 중…</output>}
       {status === "failed" && (
         <div className="catalog-error">
@@ -191,15 +198,21 @@ export function SettingsCenter({
   options,
   close,
   save,
-  sessionTitle,
+  session,
+  draft,
+  streaming,
 }: {
   token: string;
   selection: ModelSelection;
   options: ProviderOption[];
   close: () => void;
   save: (value: ModelSelection) => Promise<void>;
-  sessionTitle?: string;
+  session?: Session;
+  draft: string;
+  streaming: boolean;
 }) {
+  const sessionTitle = session?.title;
+  const [tab, setTab] = useState("공급사 · 모델");
   const dialog = useRef<HTMLDialogElement>(null);
   const [section, setSection] = useState("모델");
   const [provider, setProvider] = useState(selection.provider);
@@ -241,15 +254,42 @@ export function SettingsCenter({
       </header>
       <div className="settings-layout">
         <fieldset className="settings-rail" aria-label="설정 분류">
-          {["모델", "고급 기능"].map((item) => (
-            <button type="button" key={item} aria-pressed={section === item} onClick={() => setSection(item)}>
-              {item}
-            </button>
-          ))}
+          {["모델", "임베딩", "이미지", "TTS", "언어 지원", "고급 기능", "플러그인", "토글형 모듈"].map(
+            (item) => (
+              <button
+                type="button"
+                key={item}
+                disabled={item !== "모델" && item !== "고급 기능"}
+                title={item === "모델" || item === "고급 기능" ? undefined : "연결 예정"}
+                aria-pressed={section === item}
+                onClick={() => setSection(item)}
+              >
+                {item}
+              </button>
+            ),
+          )}
         </fieldset>
         <section className="settings-detail">
-          <h3>{section === "모델" ? "공급사 · 모델" : "로컬 서버"}</h3>
           {section === "모델" ? (
+            <fieldset className="settings-tabs" aria-label="모델 설정 항목">
+              {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트"].map((item) => (
+                <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>
+                  {item}
+                </button>
+              ))}
+            </fieldset>
+          ) : (
+            <h3>로컬 서버</h3>
+          )}
+          {section === "모델" && tab === "공용 프롬프트" ? (
+            <SharedPrompt token={token} session={session} />
+          ) : section === "모델" && tab === "컨텍스트 제어" ? (
+            session ? (
+              <ContextSettings key={session.id} session={session} token={token} draft={draft} />
+            ) : (
+              <small>대화를 시작하면 이 대화의 컨텍스트를 설정할 수 있습니다.</small>
+            )
+          ) : section === "모델" ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -257,29 +297,23 @@ export function SettingsCenter({
               }}
             >
               {sessionTitle && <small>적용할 대화 · {sessionTitle}</small>}
-              <label>
-                공급자
-                <select
-                  aria-label="공급자"
-                  value={provider}
-                  onChange={(e) => {
-                    const next = e.target.value as ProviderId;
-                    setProvider(next);
-                    setError("");
-                    setModel(
-                      next === selection.provider
-                        ? selection.model
-                        : (options.find((o) => o.id === next)?.defaultModel ?? ""),
-                    );
-                  }}
-                >
-                  {options.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {providerNames[o.id]}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <fieldset className="provider-pills" aria-label="공급자">
+                <legend>공급자</legend>
+                {options.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    aria-pressed={provider === o.id}
+                    onClick={() => {
+                      setProvider(o.id);
+                      setError("");
+                      setModel(o.id === selection.provider ? selection.model : o.defaultModel);
+                    }}
+                  >
+                    {providerNames[o.id]}
+                  </button>
+                ))}
+              </fieldset>
               {!enabled ? (
                 <small>
                   {provider === "openrouter"
@@ -292,11 +326,14 @@ export function SettingsCenter({
                 <ModelList key={provider} token={token} provider={provider} model={model} choose={setModel} />
               )}
               {error && <p role="alert">{error}</p>}
+              {streaming && <small>이 대화의 응답이 끝나면 모델을 변경할 수 있습니다.</small>}
               <footer>
                 <button
                   type="submit"
                   className="primary"
-                  disabled={saving || !enabled || !isModelSelection({ provider, model: model.trim() })}
+                  disabled={
+                    saving || streaming || !enabled || !isModelSelection({ provider, model: model.trim() })
+                  }
                 >
                   {sessionTitle ? "적용" : "이 모델로 대화 시작"}
                 </button>

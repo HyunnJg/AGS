@@ -1,8 +1,11 @@
+import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
+import { assembleContext } from "./context.ts";
+import { type ContextLimits, isLimits, maxPromptLength } from "../../../packages/contracts/src/context.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
-import { isPreset, type Preset } from "../../../packages/contracts/src/sessions.ts";
+import { type Session, isPreset, type Preset } from "../../../packages/contracts/src/sessions.ts";
 import { isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
@@ -64,6 +67,25 @@ export function createChatServer(
   const authorization = Buffer.from(`Bearer ${token}`);
   const active = new Map<string, AbortController>();
 
+  function contextFor(
+    db: SessionStore,
+    session: Session,
+    message: string,
+    limits: ContextLimits = db.limits(session.id),
+  ) {
+    const shared = db.promptSettings();
+    return assembleContext(
+      session.preset,
+      shared.prompt,
+      limits,
+      db.history(session.id, limits.turns),
+      message,
+      providers.contextWindow(session.provider, session.model) ?? null,
+      shared.order,
+      db.sources(session.id),
+    );
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const host = req.headers.host?.toLowerCase();
     const suffix = req.socket.localPort === 80 ? "" : `:${req.socket.localPort}`;
@@ -92,16 +114,50 @@ export function createChatServer(
       if (req.method !== "GET") return allow("GET");
       return json(providers.options);
     }
-    const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models$/.exec(path);
+    const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models(\?refresh=1)?$/.exec(path);
     if (catalog) {
       if (req.method !== "GET") return allow("GET");
       const option = providers.options.find((item) => item.id === catalog[1]);
       if (!option?.enabled) throw new RequestError(400, "provider_unavailable");
       try {
-        return json(await providers.models(option.id));
+        return json(await providers.models(option.id, Boolean(catalog[2])));
       } catch {
         throw new RequestError(502, "catalog_unavailable");
       }
+    }
+    if (path === "/api/settings/prompt" && store) {
+      if (req.method === "GET") return json(store.promptSettings());
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const body = await readBody(req);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("prompt" in body) ||
+        typeof body.prompt !== "string" ||
+        body.prompt.length > maxPromptLength ||
+        !("previous" in body) ||
+        typeof body.previous !== "string"
+      )
+        throw new RequestError(400, "invalid_prompt");
+      if ("order" in body || "previousOrder" in body) {
+        if (
+          !("order" in body) ||
+          !isBlockOrder(body.order) ||
+          !("previousOrder" in body) ||
+          !isBlockOrder(body.previousOrder)
+        )
+          throw new RequestError(400, "invalid_order");
+        if (
+          !store.setPromptSettings(
+            { prompt: body.prompt, order: body.order },
+            body.previous,
+            body.previousOrder,
+          )
+        )
+          throw new RequestError(409, "settings_changed");
+      } else if (!store.setPrompt(body.prompt, body.previous))
+        throw new RequestError(409, "settings_changed");
+      return json(store.promptSettings());
     }
     if (path === "/api/settings/runtime") {
       if (req.method !== "GET") return allow("GET");
@@ -139,14 +195,68 @@ export function createChatServer(
       }
       return allow("GET, POST");
     }
-    const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat)?$/.exec(path);
+    const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/sources)?$/.exec(
+      path,
+    );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/sources") {
+      if (req.method === "GET") return json(store.sources(session.id));
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const data = await readBody(req);
+      if (
+        !data ||
+        typeof data !== "object" ||
+        !("memory" in data) ||
+        typeof data.memory !== "string" ||
+        data.memory.length > maxSourceLength ||
+        !("retrieval" in data) ||
+        typeof data.retrieval !== "string" ||
+        data.retrieval.length > maxSourceLength ||
+        !("revision" in data) ||
+        typeof data.revision !== "number" ||
+        !Number.isSafeInteger(data.revision) ||
+        data.revision < 0
+      )
+        throw new RequestError(400, "invalid_sources");
+      if (
+        !store.setSources(session.id, {
+          memory: data.memory,
+          retrieval: data.retrieval,
+          revision: data.revision,
+        })
+      )
+        throw new RequestError(409, "settings_changed");
+      return json(store.sources(session.id));
+    }
+    if (session && store && route?.[2] === "/context") {
+      if (req.method === "GET") return json(store.limits(session.id));
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const limits = await readBody(req);
+      if (!isLimits(limits)) throw new RequestError(400, "invalid_limits");
+      store.setLimits(session.id, limits);
+      return json(store.limits(session.id));
+    }
+    if (session && store && route?.[2] === "/context-preview") {
+      if (req.method !== "POST") return allow("POST");
+      const body = await readBody(req);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("message" in body) ||
+        typeof body.message !== "string" ||
+        !("limits" in body) ||
+        !isLimits(body.limits)
+      )
+        throw new RequestError(400, "invalid_preview");
+      return json(contextFor(store, store.get(session.id) ?? session, body.message, body.limits));
+    }
     if (session && store && !route?.[2]) {
       if (req.method === "GET") return json({ session, turns: store.turns(session.id) });
       if (req.method !== "PATCH") return allow("GET, PATCH");
       const body = await readBody(req);
       if (isModelSelection(body)) {
+        if (store.isStreaming(session.id)) throw new RequestError(409, "session_busy");
         if (!providers.options.find((o) => o.id === body.provider)?.enabled)
           throw new RequestError(400, "provider_unavailable");
         store.setModel(session.id, body);
@@ -178,6 +288,8 @@ export function createChatServer(
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
     if (session && store) session = store.get(session.id);
+    const context = session && store ? contextFor(store, session, message) : undefined;
+    if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
     const controller = new AbortController();
@@ -224,14 +336,8 @@ export function createChatServer(
       });
       res.flushHeaders();
       const reply =
-        session && session.provider !== "mock" && store
-          ? providers.stream(
-              session,
-              session.preset,
-              [...store.history(session.id), { role: "user", content: message }],
-              signal,
-              () => timer.refresh(),
-            )
+        session && session.provider !== "mock" && context
+          ? providers.stream(session, context.messages, signal, () => timer.refresh(), context.outputBudget)
           : provider(message, signal, session?.preset);
       for await (const text of reply) {
         signal.throwIfAborted();

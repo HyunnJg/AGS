@@ -7,7 +7,7 @@ import { createChatServer } from "./server.ts";
 import { SessionStore } from "./sessions.ts";
 
 function timeoutValue(raw: string | undefined, fallback: number) {
-  if (!raw) return fallback;
+  if (!raw?.trim()) return fallback;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 2147483647) throw new Error("invalid_timeout");
   return n;

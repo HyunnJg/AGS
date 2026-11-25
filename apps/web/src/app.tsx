@@ -83,7 +83,11 @@ function Conversation({
   session,
   update,
   activity,
-  openSettings,
+  favorites,
+  options,
+  onRemoteActivity,
+  text,
+  setText,
   visible,
 }: {
   token: string;
@@ -91,19 +95,30 @@ function Conversation({
   update: (s: Session) => void;
   activity: (id: string, running: boolean) => void;
   visible: boolean;
-  openSettings: () => void;
+  favorites: ModelSelection[];
+  options: ProviderOption[];
+  onRemoteActivity: (id: string, active: boolean) => void;
+  text: string;
+  setText: (value: string) => void;
 }) {
+  const choices: ModelSelection[] = [{ provider: "mock", model: "" }, ...favorites];
+  if (!choices.some((c) => c.provider === session.provider && c.model === session.model))
+    choices.push(session);
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [pendingId, setPendingId] = useState("");
-  const [text, setText] = useState("");
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const sending = useRef(false);
   const remoteStreaming = !busy && turns.some((t) => t.status === "streaming");
+  useEffect(() => {
+    if (!remoteStreaming) return;
+    onRemoteActivity(session.id, true);
+    return () => onRemoteActivity(session.id, false);
+  }, [remoteStreaming, session.id, onRemoteActivity]);
   useEffect(() => {
     let alive = true;
     async function read() {
@@ -221,15 +236,6 @@ function Conversation({
     <section className="conversation" hidden={!visible}>
       <header>
         <h2>{session.title}</h2>
-        <button
-          type="button"
-          className="model-label"
-          aria-label="모델 설정"
-          disabled={busy || remoteStreaming || savingPreset || !ready}
-          onClick={openSettings}
-        >
-          {providerNames[session.provider]} {session.model} ▾
-        </button>
         <label className="preset">
           프리셋{" "}
           <select
@@ -286,9 +292,28 @@ function Conversation({
             }}
           />
           <div className="actions">
-            <small>
-              <span className="dot" /> {providerNames[session.provider]}
-            </small>
+            <select
+              className="quick-model"
+              aria-label="등록 모델 선택"
+              title="설정에서 별표로 등록한 모델"
+              value={JSON.stringify([session.provider, session.model])}
+              disabled={!ready || busy || remoteStreaming || savingPreset}
+              onChange={(e) => {
+                const [provider, model] = JSON.parse(e.target.value);
+                void changeSettings({ provider, model });
+              }}
+            >
+              {choices.map((choice) => (
+                <option
+                  key={JSON.stringify([choice.provider, choice.model])}
+                  value={JSON.stringify([choice.provider, choice.model])}
+                  disabled={!options.find((o) => o.id === choice.provider)?.enabled}
+                >
+                  {providerNames[choice.provider]}
+                  {choice.model && ` · ${choice.model}`}
+                </option>
+              ))}
+            </select>
             {busy ? (
               <button type="button" disabled={!pendingId} onClick={() => void cancel()}>
                 ■ 중단
@@ -317,8 +342,36 @@ function Workspace({ token }: { token: string }) {
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
+  const [favorites, setFavorites] = useState<ModelSelection[]>([]);
+  useEffect(() => {
+    if (settings) return;
+    let alive = true;
+    const reload = () => {
+      api(token, "/api/settings/favorites")
+        .then((r) => r.json())
+        .then((rows) => {
+          if (alive) setFavorites(rows);
+        })
+        .catch((e) => {
+          if (alive) setError(problem(e));
+        });
+    };
+    reload();
+    window.addEventListener("focus", reload);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", reload);
+    };
+  }, [token, settings]);
   const currentSession = sessions.find((s) => s.id === id);
+  const [remoteId, setRemoteId] = useState("");
+  const onRemoteActivity = useCallback(
+    (key: string, active: boolean) =>
+      setRemoteId((previous) => (active ? key : previous === key ? "" : previous)),
+    [],
+  );
   const [running, setRunning] = useState<string[]>([]);
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
@@ -403,7 +456,7 @@ function Workspace({ token }: { token: string }) {
         <button
           type="button"
           className="settings-launcher"
-          disabled={!ready || locked || running.includes(id)}
+          disabled={!ready || locked}
           onClick={() => setSettings(true)}
         >
           설정
@@ -413,7 +466,9 @@ function Workspace({ token }: { token: string }) {
         <SettingsCenter
           token={token}
           selection={currentSession ?? { provider: "mock", model: "" }}
-          sessionTitle={currentSession?.title}
+          session={currentSession}
+          draft={drafts[id] ?? ""}
+          streaming={running.includes(id) || Boolean(id && remoteId === id)}
           options={options}
           close={() => setSettings(false)}
           save={applyModel}
@@ -427,7 +482,11 @@ function Workspace({ token }: { token: string }) {
             session={current}
             activity={activity}
             visible={current.id === id}
-            openSettings={() => setSettings(true)}
+            text={drafts[current.id] ?? ""}
+            setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
+            onRemoteActivity={onRemoteActivity}
+            favorites={favorites}
+            options={options}
             update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
           />
         ))

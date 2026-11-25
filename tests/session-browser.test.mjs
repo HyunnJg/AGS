@@ -33,6 +33,19 @@ test(
       for await (const chunk of req) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString());
       assert.equal(payload.model, "ui/test-model");
+      assert.equal(payload.max_tokens, 123);
+      assert.equal(payload.messages.length, 4);
+      assert.match(payload.messages[0].content, /테스트 공용 지침\n- 실제 줄바꿈/);
+      assert.deepEqual(
+        payload.messages.slice(1).map((m) => m.content),
+        [
+          "장기기억 (참고 자료)\n유지할 메모",
+          "오래 걸리는 요청",
+          "검색·임베딩 자료 (참고 자료)\n찾아낸 자료",
+        ],
+      );
+      assert.ok(payload.messages.slice(1).every((m) => m.role === "user"));
+      assert.match(payload.messages[0].content, /테스트 공용 지침/);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write('data: {"choices":[{"delta":{"content":"독립 세션 응답"}}]}\n\n');
       // The browser test controls when this active request is cancelled.
@@ -119,19 +132,73 @@ test(
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
     assert.equal(await page.getByLabel("프리셋").inputValue(), "coding");
     assert.equal(await page.locator("article").count(), 1);
-    await page.getByRole("button", { name: "모델 설정" }).click();
-    await page.getByLabel("공급자", { exact: true }).selectOption("custom");
+    await page.getByLabel("메시지").fill("오래 걸리는 요청");
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "공용 프롬프트" }).click();
+    await page.getByLabel("모든 대화의 공용 지침").fill("테스트 공용 지침\n- 실제 줄바꿈");
+    await page.getByRole("button", { name: "현재 입력 위로" }).click();
+    const otherEdit = await page.request.put(`${base}/api/settings/prompt`, {
+      headers: { authorization: `Bearer ${token}` },
+      data: { prompt: "다른 창의 지침", previous: "" },
+    });
+    assert.equal(otherEdit.status(), 200);
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await page.getByRole("button", { name: "최신 내용 불러오기" }).click();
+    await page.getByText("다른 창의 지침", { exact: true }).waitFor();
+    assert.equal(
+      await page.getByLabel("모든 대화의 공용 지침").inputValue(),
+      "테스트 공용 지침\n- 실제 줄바꿈",
+    );
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("dialog textarea")?.disabled &&
+        document.querySelector("dialog button[type=submit]")?.disabled,
+    );
+    await page.getByRole("button", { name: "컨텍스트 제어" }).click();
+    await page.getByLabel("최근 완료 대화 (턴)").fill("0");
+    await page.getByLabel("최대 출력 토큰").fill("123");
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await page.getByText("이 대화의 참고 자료", { exact: true }).click();
+    await page.getByLabel("장기기억 메모").fill("유지할 메모");
+    await page.getByLabel("검색·임베딩 자료 (직접 입력)", { exact: true }).fill("찾아낸 자료");
+    const savedSources = page.waitForResponse(
+      (r) => r.url().endsWith("/sources") && r.request().method() === "PUT" && r.status() === 200,
+    );
+    await page.getByRole("button", { name: "참고 자료 저장" }).click();
+    await savedSources;
+    await page.getByRole("button", { name: "전송 미리보기" }).click();
+    await page.getByText(/포함된 대화 0턴/).waitFor();
+    await page.getByText("현재 입력", { exact: true }).click();
+    await page.locator("pre").filter({ hasText: "오래 걸리는 요청" }).waitFor();
+    await page.getByRole("button", { name: "공급사 · 모델" }).click();
+    await page.getByRole("button", { name: "사용자 지정 API", exact: true }).click();
     await page.getByLabel("모델 검색").fill("Second");
+    await page.getByRole("button", { name: "목록 새로고침" }).click();
     await page.getByRole("button", { name: /Second model/ }).click();
     await page.getByRole("button", { name: "ui/test-model 즐겨찾기" }).click();
     await page.locator('.pin[aria-pressed="true"]').waitFor();
     await page.getByRole("button", { name: "적용", exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
-    assert.match(await page.getByRole("button", { name: "모델 설정" }).innerText(), /ui\/test-model/);
+    assert.match(await page.getByLabel("등록 모델 선택").inputValue(), /ui\/test-model/);
+    const quick = page.getByLabel("등록 모델 선택");
+    const switchModel = async (provider, model) => {
+      const patched = page.waitForResponse((r) => r.request().method() === "PATCH" && r.status() === 200);
+      await quick.selectOption(JSON.stringify([provider, model]));
+      await patched;
+    };
+    await switchModel("mock", "");
+    await switchModel("custom", "ui/test-model");
+    assert.equal(await page.getByRole("dialog").count(), 0);
     await page.getByLabel("메시지").fill("오래 걸리는 요청");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("독립 세션 응답", { exact: true }).waitFor();
 
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    assert.ok(await page.getByRole("button", { name: "적용", exact: true }).isDisabled());
+    await page.getByRole("button", { name: "고급 기능" }).click();
+    await page.getByText(dir, { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "＋ 새 대화", exact: true }).click();
     await page.getByRole("heading", { name: "새 대화", exact: true }).waitFor();
     await page.getByRole("textbox", { name: "메시지" }).fill("별도 세션");
@@ -141,8 +208,8 @@ test(
     await page.getByRole("button", { name: "중단" }).click();
     await page.getByText("중단됨", { exact: true }).waitFor();
     await page.reload();
-    await page.getByRole("button", { name: "모델 설정" }).waitFor();
-    assert.match(await page.getByRole("button", { name: "모델 설정" }).innerText(), /ui\/test-model/);
+    await page.getByLabel("등록 모델 선택").waitFor();
+    assert.match(await page.getByLabel("등록 모델 선택").inputValue(), /ui\/test-model/);
     await page.getByText("독립 세션 응답", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
