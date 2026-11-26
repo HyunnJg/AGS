@@ -118,3 +118,10 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 `GET/PUT /api/settings/collaboration`은 협업 허용 여부(`enabled`, 기본 false)를 조회·변경한다. 끄면 새 검토 호출을 막는다. `POST /api/sessions/{id}/review`는 클라이언트가 생성한 UUID `id`, `target: {provider, model}`, `message`(1–8,000자), `approved: true`를 받는다. 승인된 본문과 고정 검토 지침으로 별도 세션에서 한 번 호출하며 외부 모델의 최대 출력은 1,200토큰이다. 같은 ID로 같은 요청을 재전송하면 기존 상태를 반환한다. 동일 원본 대화에서 서로 다른 검토를 동시에 요청하면 409다. HTTP 연결 중단 또는 서버의 전체 시간 제한은 진행 중인 호출을 중지한다.
 
 `GET /api/sessions/{id}/review`는 최근 검토 또는 null을 반환한다. 결과에는 요청 ID, 독립 세션 ID(`reviewer`), 선택한 모델, 보낸 본문, 응답, 상태가 포함된다. 이전 검토는 각각의 세션에 남는다. 재시작 시 실행 중이던 검토는 interrupted로 복구한다. 결과의 작업 폴더 저장은 일반 파일 생성과 같은 제안·승인 경로를 사용한다.
+
+
+### 호출 기록
+
+인증된 `GET /api/call-logs`는 종료 순서가 최신인 호출부터 최대 100건의 요약을 반환한다. `GET /api/call-logs/{id}`는 단건 상세, `GET /api/call-logs/export`는 같은 상세 형식의 전체 배열이다. `GET/PUT /api/settings/call-logs`는 새 호출 기록 설정(`enabled`)을 읽고 변경한다. 요청자는 로컬 토큰을 제공해야 한다.
+
+상세에는 호출 종류·세션·모델·시작 시각·소요 시간·종료 상태·HTTP 상태, 응답 헤더, 수신한 본문과 조립한 답변이 들어간다. 본문은 fetch가 디코딩한 HTTP 스트림에서 실제 읽은 UTF-8 텍스트이며 SSE 주석·usage·종료 프레임도 포함한다. 응답 헤더는 콘텐츠 형식·요청 ID·속도 제한 등 진단용 값만 표시한다. 응답이 없는 경우 HTTP 상태는 null이다. 목록 캐시 적중은 새 호출을 만들지 않는다. 완료·실패·중단·시간 초과 시 저장하며 프로세스 강제 종료 전 끝나지 않은 호출은 기록되지 않는다. `bodyLimited` 및 `answerLimited`는 수집 상한 도달 등으로 일부만 보존되었음을 뜻한다.

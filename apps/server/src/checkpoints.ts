@@ -1,3 +1,4 @@
+import { callStatus } from "../../../packages/providers/src/capture.ts";
 import type { ContextLimits } from "../../../packages/contracts/src/context.ts";
 import { messageCost } from "./context.ts";
 import { createHash } from "node:crypto";
@@ -19,6 +20,7 @@ function sample(text: string) {
   return chars.length > 3000 ? `${chars.slice(0, 3000).join("")} [이후 생략]` : text;
 }
 async function summarize(
+  store: SessionStore,
   session: Session,
   turns: Excerpt[],
   limits: ContextLimits,
@@ -26,7 +28,7 @@ async function summarize(
   signal: AbortSignal,
 ) {
   if (session.provider === "mock") {
-    return turns
+    const result = turns
       .map((t, i) => {
         const lines = t.message
           .split(/\r?\n/)
@@ -35,6 +37,10 @@ async function summarize(
         return `- [${i + 1}] ${(lines.length ? lines.join(" / ") : t.message.trim()).slice(0, 230)}`;
       })
       .join("\n");
+    const capture = store.startCall("checkpoint", session, session.id);
+    capture?.answer(result);
+    capture?.finish("completed");
+    return result;
   }
   const messages = [
     {
@@ -54,18 +60,22 @@ async function summarize(
   const budget = Math.min(limits.inputBudget ?? Infinity, (window ?? Infinity) - output);
   if (messages.reduce((sum, m) => sum + messageCost(m.content), 0) > budget)
     throw new WorkspaceError(422, "checkpoint_budget");
+  const capture = store.startCall("checkpoint", session, session.id);
   let result = "";
   try {
-    for await (const part of providers.stream(session, messages, signal, undefined, output)) {
+    for await (const part of providers.stream(session, messages, signal, undefined, output, capture)) {
+      capture?.answer(part);
       result += part;
       if (result.length > maxSummary) throw new WorkspaceError(422, "checkpoint_too_long");
     }
+    if (!result.trim()) throw new WorkspaceError(502, "checkpoint_empty");
+    capture?.finish("completed");
   } catch (e) {
+    capture?.finish(callStatus(signal));
     if (signal.aborted) throw new WorkspaceError(408, "checkpoint_timeout");
     if (e instanceof ProviderError) throw new WorkspaceError(502, e.code);
     throw e;
   }
-  if (!result.trim()) throw new WorkspaceError(502, "checkpoint_empty");
   return result.trim();
 }
 
@@ -116,7 +126,7 @@ export class CheckpointService {
         const first = turns[0]?.id,
           last = turns.at(-1)?.id;
         if (!first || !last) throw new WorkspaceError(409, "no_checkpoint_turns");
-        const summary = await summarize(session, turns, store.limits(session.id), providers, signal);
+        const summary = await summarize(store, session, turns, store.limits(session.id), providers, signal);
         check();
         return {
           first,

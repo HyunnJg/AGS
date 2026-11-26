@@ -685,6 +685,29 @@ test(
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "첫 작업", exact: true }).click();
     await page.getByText(original, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "호출 로그", exact: true }).click();
+    const list = await (await page.request.get(`${base}/api/call-logs`, { headers })).json();
+    for (const kind of ["chat", "review", "checkpoint", "catalog"])
+      assert.ok(list.some((row) => row.kind === kind));
+    const sample = list.find(
+      (row) => row.kind === "chat" && row.provider === "custom" && row.status === "completed",
+    );
+    await page.getByLabel("호출 선택").selectOption(sample.id);
+    const detail = page.getByRole("region", { name: "호출 상세" });
+    await detail.getByText(/HTTP 200/).waitFor();
+    await detail.locator("pre").filter({ hasText: "[DONE]" }).waitFor();
+    assert.match(await detail.locator("pre").nth(0).innerText(), /text\/event-stream/);
+    assert.equal(await detail.locator("pre").nth(2).innerText(), "복원 확인");
+    for (const button of ["이 호출 JSON 다운로드", "전체 JSON 다운로드"]) {
+      const file = page.waitForEvent("download");
+      await page.getByRole("button", { name: button }).click();
+      const data = JSON.parse(await readFile(await (await file).path(), "utf8"));
+      const row = Array.isArray(data) ? data.find((item) => item.id === sample.id) : data;
+      assert.equal(row.answer, "복원 확인");
+      assert.ok(row.body.includes("[DONE]"));
+      assert.ok(!JSON.stringify(data).includes("fixture-only"));
+    }
     assert.deepEqual(pageErrors, []);
   },
 );

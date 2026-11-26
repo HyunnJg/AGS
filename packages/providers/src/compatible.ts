@@ -1,3 +1,4 @@
+import type { CallCapture } from "./capture.ts";
 import { createCatalog } from "./catalog.ts";
 import type { ModelSelection, ProviderId, ProviderOption } from "../../contracts/src/providers.ts";
 import type { Message } from "../../contracts/src/context.ts";
@@ -30,7 +31,7 @@ export class ProviderError extends Error {
 }
 
 // Decode frames across arbitrary network and UTF-8 boundaries, including SSE comments.
-async function* readReply(body: ReadableStream<Uint8Array>, onActivity?: () => void) {
+async function* readReply(body: ReadableStream<Uint8Array>, onActivity?: () => void, capture?: CallCapture) {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let pending = "";
@@ -38,6 +39,7 @@ async function* readReply(body: ReadableStream<Uint8Array>, onActivity?: () => v
     while (true) {
       const { value, done } = await reader.read();
       if (done) throw new ProviderError("provider_failed");
+      capture?.bytes(value);
       onActivity?.();
       pending += decoder.decode(value, { stream: true });
       for (;;) {
@@ -89,8 +91,10 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     signal: AbortSignal,
     onActivity?: () => void,
     outputBudget?: number | null,
+    capture?: CallCapture,
   ) {
     const { url, key } = endpoint(selection.provider);
+    protect(capture);
     if (!url || (selection.provider === "openrouter" && !key) || selection.provider === "mock")
       throw new ProviderError("provider_failed");
     try {
@@ -110,21 +114,26 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
           ...(outputBudget != null && { max_tokens: outputBudget }),
         }),
       });
+      capture?.response(response);
       if (
         !response.ok ||
         !response.body ||
         !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")
       ) {
-        await response.body?.cancel();
+        if (capture) await capture.errorBody(response.body);
+        else await response.body?.cancel();
         if ([401, 403].includes(response.status)) throw new ProviderError("provider_auth");
         throw new ProviderError(response.status === 429 ? "provider_limit" : "provider_failed");
       }
-      yield* readReply(response.body, onActivity);
+      yield* readReply(response.body, onActivity, capture);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof ProviderError) throw error;
       throw new ProviderError("provider_failed");
     }
   }
-  return { options, stream, ...createCatalog(send, endpoint) };
+  function protect(capture?: CallCapture) {
+    capture?.protect(env.AGS_CUSTOM_API_KEY, env.AGS_OPENROUTER_API_KEY);
+  }
+  return { options, stream, protect, ...createCatalog(send, endpoint) };
 }

@@ -1,3 +1,4 @@
+import { callStatus } from "../../../packages/providers/src/capture.ts";
 import { isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { reviewInputLimit, reviewOutputTokens } from "../../../packages/contracts/src/reviews.ts";
 import { ProviderError, type configureProviders } from "../../../packages/providers/src/compatible.ts";
@@ -58,21 +59,25 @@ export async function runReview(
     throw new WorkspaceError(422, "review_budget");
   signal.throwIfAborted();
   db.startReview(requester, id, target, message);
+  const capture = db.startCall("review", target, requester);
   try {
     started?.(id);
     const stream =
       target.provider === "mock"
         ? streamMock(message, signal)
-        : providers.stream(target, messages, signal, undefined, reviewOutputTokens);
+        : providers.stream(target, messages, signal, undefined, reviewOutputTokens, capture);
     let result = "";
     for await (const part of stream) {
+      capture?.answer(part);
       result += part;
       if (result.length > 16000) throw new WorkspaceError(422, "review_too_long");
     }
     signal.throwIfAborted();
     if (!result.trim()) throw new WorkspaceError(502, "review_empty");
     db.finishReview(id, result);
+    capture?.finish("completed");
   } catch (error) {
+    capture?.finish(callStatus(signal));
     db.finish(id, signal.aborted ? "cancelled" : "failed");
     if (signal.aborted) throw new WorkspaceError(408, "review_cancelled");
     if (error instanceof ProviderError) throw new WorkspaceError(502, error.code);

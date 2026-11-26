@@ -56,6 +56,11 @@ function ReviewResult({
           >
             입력창에 추가
           </button>
+          {(!project?.root || !project.writable) && (
+            <small>
+              프로젝트 섹션에서 작업 폴더를 승인형 저장으로 연결하면 검토 결과를 파일로 저장할 수 있습니다.
+            </small>
+          )}
           {project?.root && project.writable && (
             <FileWrite
               key={project.root}

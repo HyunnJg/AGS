@@ -43,7 +43,12 @@ test(
         requests.push(JSON.parse(Buffer.concat(parts).toString()));
         if (mode === "network") return req.socket.destroy();
         if (/^\d+$/.test(mode)) {
-          res.writeHead(Number(mode)).end(secret);
+          res
+            .writeHead(Number(mode), {
+              "set-cookie": "sid=private-cookie",
+              "x-request-id": "fixture-request",
+            })
+            .end(JSON.stringify({ message: secret, error: "fixture-error" }));
           return;
         }
         res.writeHead(200, { "content-type": "text/event-stream" });
@@ -215,6 +220,34 @@ test(
       assert.ok(wire.includes(expected ?? "") && !wire.includes("event: done"));
       assert.equal(store.turns(a.id).at(-1)?.status, "failed");
     }
+    const exported = await (await call("/api/call-logs/export", "GET")).json();
+    assert.ok(
+      !JSON.stringify(exported).includes(secret) && !JSON.stringify(exported).includes("private-cookie"),
+    );
+    const authFailure = exported.find((log: { httpStatus: number }) => log.httpStatus === 401);
+    assert.equal(authFailure.headers["set-cookie"], "[가림]");
+    assert.equal(authFailure.headers["x-request-id"], "fixture-request");
+    assert.equal(JSON.parse(authFailure.body).error, "fixture-error");
+    assert.equal(authFailure.answer, "");
+    assert.ok(
+      exported.some(
+        (log: { body: string; answer: string; status: string }) =>
+          log.body.includes(": keepalive") &&
+          log.body.includes("total_tokens") &&
+          log.answer === "한글" &&
+          log.status === "completed",
+      ),
+    );
+    assert.ok(
+      exported.some(
+        (log: { body: string; answer: string; status: string }) =>
+          log.body.includes(": keepalive") &&
+          !log.body.includes("[DONE]") &&
+          log.answer === "한글" &&
+          log.status === "failed",
+      ),
+    );
+    assert.equal((await fetch(`${base}/api/call-logs/export`)).status, 401);
     mode = "wait";
     const waiting = await send("cancel");
     assert.equal((await call(path, "PATCH", { provider: "mock", model: "" })).status, 409);
@@ -234,6 +267,10 @@ test(
     const timeout = await (await send("timeout")).text();
     assert.match(timeout, /"code":"timeout"/);
     assert.ok(!timeout.includes(secret));
+    const [timedOut, cancelled] = store.callDetails();
+    assert.equal(timedOut?.status, "timeout");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.answer, "한글");
     const b = await (await call("/api/sessions", "POST")).json();
     assert.equal(store.history(b.id).length, 0);
     assert.deepEqual(await (await call(`/api/sessions/${b.id}/context`, "GET")).json(), {

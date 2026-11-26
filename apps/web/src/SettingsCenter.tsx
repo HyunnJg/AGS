@@ -1,3 +1,4 @@
+import { CallLogs } from "./CallLogs.tsx";
 import { ProviderConnection } from "./ProviderConnection.tsx";
 import { SectionMemorySetting } from "./SectionMemory.tsx";
 import { DisplayRules } from "./DisplayRules.tsx";
@@ -263,13 +264,13 @@ export function SettingsCenter({
       </header>
       <div className="settings-layout">
         <fieldset disabled={saving} className="settings-rail" aria-label="설정 분류">
-          {["모델", "임베딩", "이미지", "TTS", "언어 지원", "고급 기능", "플러그인", "토글형 모듈"].map(
+          {["모델", "임베딩", "이미지", "TTS", "언어 지원", "고급 기능", "플러그인", "토글형 모듈", "호출 로그"].map(
             (item) => (
               <button
                 type="button"
                 key={item}
-                disabled={!["모델", "고급 기능", "토글형 모듈"].includes(item)}
-                title={["모델", "고급 기능", "토글형 모듈"].includes(item) ? undefined : "연결 예정"}
+                disabled={!["모델", "고급 기능", "토글형 모듈", "호출 로그"].includes(item)}
+                title={["모델", "고급 기능", "토글형 모듈", "호출 로그"].includes(item) ? undefined : "연결 예정"}
                 aria-pressed={section === item}
                 onClick={() => setSection(item)}
               >
@@ -288,7 +289,7 @@ export function SettingsCenter({
               ))}
             </fieldset>
           ) : (
-            <h3>{section === "토글형 모듈" ? section : "로컬 서버"}</h3>
+            <h3>{section === "고급 기능" ? "로컬 서버" : section}</h3>
           )}
           {section === "모델" && tab === "정규식" ? (
             <DisplayRules token={token} onSaved={onRulesSaved} />
@@ -366,6 +367,8 @@ export function SettingsCenter({
                 </footer>
               </form>
             </>
+          ) : section === "호출 로그" ? (
+            <CallLogs token={token} />
           ) : section === "토글형 모듈" ? (
             <SectionMemorySetting token={token} />
           ) : (

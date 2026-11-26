@@ -749,3 +749,10 @@ header h2 {
 .provider-connection .remove-provider-key { display: flex; align-items: center; gap: 6px; }
 .provider-connection .remove-provider-key input { width: auto; }
 .provider-connection output { display: block; margin-top: 8px; }
+
+.call-logs, .call-detail { display: grid; gap: 10px; min-width: 0; }
+.call-logs .match-case { display: flex; align-items: center; gap: 6px; }
+.call-logs .match-case input { width: auto; }
+.call-detail h4, .call-detail p, .call-detail pre { margin: 0; }
+.call-detail button { justify-self: start; }
+.call-detail pre { max-height: 15rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: #f3f6f3; }
