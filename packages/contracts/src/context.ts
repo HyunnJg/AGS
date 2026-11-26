@@ -70,16 +70,18 @@ export interface BlockUsage {
   includedMessages: number;
   omittedMessages: number;
 }
-export interface ContextPreview {
+export interface ContextBudget {
+  estimatedInput: number;
   inputCeiling: number | null;
   blockUsage: BlockUsage[];
+}
+export interface ContextPreview extends ContextBudget {
   memoryUse?: MemoryUse;
   stateStale?: boolean;
   messages: Message[];
   blocks: ("system" | Block)[];
   excluded: Block[];
   includedTurns: number;
-  estimatedInput: number;
   modelWindow: number | null;
   fits: boolean;
   outputBudget: number | null;

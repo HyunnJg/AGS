@@ -526,7 +526,12 @@ export function createChatServer(
           }
         }, 150);
     }
-    const capture = store?.startCall("chat", session ?? { provider: "mock", model: "" }, session?.id ?? null);
+    const capture = store?.startCall(
+      "chat",
+      session ?? { provider: "mock", model: "" },
+      session?.id ?? null,
+      session?.provider === "mock" ? undefined : context,
+    );
     try {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",

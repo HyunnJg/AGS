@@ -109,7 +109,8 @@ test(
         contentBytes: sent.messages.reduce((total, m) => total + Buffer.byteLength(m.content), 0),
         maxTokens: sent.max_tokens ?? null,
       });
-      assert.ok(!("request" in (store.callList()[0] ?? {})));
+      const row = store.callList()[0] ?? {};
+      assert.ok(!("request" in row) && !("contextBudget" in row));
     };
     checkSummary();
     const displayPath = "/api/settings/display-rules";
@@ -207,10 +208,27 @@ test(
     assert.deepEqual(requests.at(-1)?.messages, withKnowledge.messages);
     store.removeReference(a.id, knowledge);
     store.removeReference(a.id, ref);
+    const requiredOnly = {
+      ...limits,
+      inputBudget: Buffer.byteLength(preview.messages[0].content) + Buffer.byteLength("다음") + 16,
+    };
+    await call(`${path}/context`, "PUT", requiredOnly);
+    const trimmed = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits: requiredOnly })).json();
+    assert.match(await (await send("다음")).text(), /event: done/);
+    assert.deepEqual(requests.at(-1)?.messages, trimmed.messages);
+    const trimmedId = store.callList()[0]?.id;
+    const expectedBudget = {
+      estimatedInput: trimmed.estimatedInput,
+      inputCeiling: requiredOnly.inputBudget,
+      blockUsage: trimmed.blockUsage,
+    };
+    assert.ok(expectedBudget.blockUsage.some((row: { omittedMessages: number }) => row.omittedMessages > 0));
+    const countBeforeRejection = store.callList().length;
     const before = store.turns(a.id).length;
     await call(`${path}/context`, "PUT", { ...limits, inputBudget: 1 });
     assert.equal((await send("큰 입력")).status, 422);
-    assert.equal(requests.length, callsBefore + 2);
+    assert.equal(requests.length, callsBefore + 3);
+    assert.equal(store.callList().length, countBeforeRejection);
     assert.equal(store.turns(a.id).length, before);
     await call(`${path}/context`, "PUT", limits);
     mode = "burst";
@@ -237,11 +255,13 @@ test(
     assert.ok(
       !JSON.stringify(exported).includes(secret) && !JSON.stringify(exported).includes("private-cookie"),
     );
+    assert.deepEqual(exported.find((row: { id: string }) => row.id === trimmedId).contextBudget, expectedBudget);
     const authFailure = exported.find((log: { httpStatus: number }) => log.httpStatus === 401);
     assert.equal(authFailure.headers["set-cookie"], "[가림]");
     assert.equal(authFailure.headers["x-request-id"], "fixture-request");
     assert.equal(JSON.parse(authFailure.body).error, "fixture-error");
     assert.equal(authFailure.answer, "");
+    assert.equal(authFailure.contextBudget.inputCeiling, limits.inputBudget);
     assert.ok(
       exported.some(
         (log: { body: string; answer: string; status: string }) =>

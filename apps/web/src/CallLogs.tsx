@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { callKinds, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
+import { BlockBudgetTable } from "./BlockBudgetTable.tsx";
 import { api } from "./api.ts";
 
 const statuses = {
@@ -67,6 +68,18 @@ function CallDetail({ token, id }: { token: string; id: string }) {
               ? "모델 목록 조회 · 요청 본문 없음"
               : "저장된 요청 요약 없음"}
         </p>
+      )}
+      {log.contextBudget && (
+        <>
+          <h4>전송 시 입력 구성</h4>
+          <p>
+            AGS 추정 입력 {log.contextBudget.estimatedInput.toLocaleString()}토큰 · 입력 한도{" "}
+            {log.contextBudget.inputCeiling === null
+              ? "미지정"
+              : `${log.contextBudget.inputCeiling.toLocaleString()}토큰`}
+          </p>
+          <BlockBudgetTable rows={log.contextBudget.blockUsage} />
+        </>
       )}
       <h4>응답 헤더</h4>
       <pre>{log.httpStatus ? JSON.stringify(log.headers, null, 2) : noHttp}</pre>
