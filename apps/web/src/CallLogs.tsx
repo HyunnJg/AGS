@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
 import { BlockBudgetTable } from "./BlockBudgetTable.tsx";
@@ -17,14 +17,15 @@ function LogFilter({ label, options, value, change }: {
   value: string;
   change: (value: string) => void;
 }) {
+  const id = useId();
   return (
-    <label>
-      {label}
-      <select value={value} onChange={(event) => change(event.target.value)}>
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(event) => change(event.target.value)}>
         <option value="">전체</option>
         {Object.entries(options).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
       </select>
-    </label>
+    </div>
   );
 }
 
