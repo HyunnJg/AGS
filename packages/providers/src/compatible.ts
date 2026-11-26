@@ -1,4 +1,8 @@
 import type { CallCapture } from "./capture.ts";
+import { anthropicPayload, anthropicReply, defaultClaudeOutput } from "./anthropic.ts";
+import { providerHeaders } from "./headers.ts";
+import { ProviderError, responseError } from "./errors.ts";
+export { ProviderError } from "./errors.ts";
 import { geminiPayload, geminiReply } from "./gemini.ts";
 import { createCatalog } from "./catalog.ts";
 import {
@@ -10,6 +14,7 @@ import {
 import type { Message } from "../../contracts/src/context.ts";
 
 export const officialBaseUrls = {
+  anthropic: "https://api.anthropic.com/v1/",
   openai: "https://api.openai.com/v1/",
   gemini: "https://generativelanguage.googleapis.com/v1beta/",
   openrouter: "https://openrouter.ai/api/v1/",
@@ -29,15 +34,6 @@ export function customEndpoint(base: string | undefined) {
     throw new Error("invalid_custom_url");
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
   return url.href;
-}
-
-type UpstreamCode = "provider_auth" | "provider_limit" | "provider_failed";
-export class ProviderError extends Error {
-  readonly code: UpstreamCode;
-  constructor(code: UpstreamCode) {
-    super(code);
-    this.code = code;
-  }
 }
 
 // Decode frames across arbitrary network and UTF-8 boundaries, including SSE comments.
@@ -108,6 +104,11 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       enabled: Boolean(env.AGS_GEMINI_API_KEY),
       defaultModel: env.AGS_GEMINI_MODEL?.trim() || "",
     },
+    {
+      id: "anthropic",
+      enabled: Boolean(env.AGS_ANTHROPIC_API_KEY),
+      defaultModel: env.AGS_ANTHROPIC_MODEL?.trim() || "",
+    },
     { id: "custom", enabled: Boolean(custom), defaultModel: env.AGS_CUSTOM_MODEL?.trim() || "" },
   ];
   function endpoint(provider: ProviderId) {
@@ -128,9 +129,31 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     protect(capture);
     if (!url) throw new ProviderError("provider_failed");
     try {
-      const native = selection.provider === "gemini";
-      if (native && !isModelSelection(selection)) throw new ProviderError("provider_failed");
-      const path = native ? `models/${selection.model}:streamGenerateContent?alt=sse` : "chat/completions";
+      const { provider, model } = selection;
+      if (!isModelSelection(selection)) throw new ProviderError("provider_failed");
+      let path = "chat/completions";
+      let payload: Record<string, unknown>;
+      let reply = compatibleReply;
+      if (provider === "anthropic") {
+        path = "messages";
+        outputBudget ??= defaultClaudeOutput;
+        payload = anthropicPayload(model, messages, outputBudget);
+        reply = anthropicReply;
+      } else if (provider === "gemini") {
+        path = `models/${model}:streamGenerateContent?alt=sse`;
+        payload = geminiPayload(messages, outputBudget);
+        reply = geminiReply;
+      } else {
+        payload = {
+          model,
+          stream: true,
+          messages,
+          ...(provider === "openai" && { stream_options: { include_usage: true } }),
+          ...(outputBudget != null && {
+            [provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
+          }),
+        };
+      }
       capture?.recordRequest(messages, outputBudget);
       const response = await send(new URL(path, url).href, {
         method: "POST",
@@ -139,21 +162,9 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         headers: {
           "content-type": "application/json",
           accept: "text/event-stream",
-          ...(key && (native ? { "x-goog-api-key": key } : { authorization: `Bearer ${key}` })),
+          ...providerHeaders(provider, key),
         },
-        body: JSON.stringify(
-          native
-            ? geminiPayload(messages, outputBudget)
-            : {
-                model: selection.model,
-                stream: true,
-                ...(selection.provider === "openai" && { stream_options: { include_usage: true } }),
-                messages,
-                ...(outputBudget != null && {
-                  [selection.provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
-                }),
-              },
-        ),
+        body: JSON.stringify(payload),
       });
       capture?.response(response);
       if (
@@ -161,13 +172,10 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         !response.body ||
         !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")
       ) {
-        if (capture) await capture.errorBody(response.body);
-        else await response.body?.cancel();
-        if ([401, 403].includes(response.status)) throw new ProviderError("provider_auth");
-        throw new ProviderError(response.status === 429 ? "provider_limit" : "provider_failed");
+        throw await responseError(provider, response, capture);
       }
       const events = eventData(response.body, onActivity, capture);
-      yield* native ? geminiReply(events) : compatibleReply(events);
+      yield* reply(events);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof ProviderError) throw error;
@@ -180,6 +188,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       env.AGS_OPENROUTER_API_KEY,
       env.AGS_OPENAI_API_KEY,
       env.AGS_GEMINI_API_KEY,
+      env.AGS_ANTHROPIC_API_KEY,
     );
   }
   return { options, stream, protect, ...createCatalog(send, endpoint) };

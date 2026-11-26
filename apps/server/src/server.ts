@@ -1,3 +1,4 @@
+import { defaultClaudeOutput } from "../../../packages/providers/src/anthropic.ts";
 import { callStatus } from "../../../packages/providers/src/capture.ts";
 import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
@@ -104,7 +105,7 @@ export function createChatServer(
     const assembled = assembleContext(
       session.preset,
       shared.prompt,
-      limits,
+      session.provider === "anthropic" && limits.outputBudget === null ? { ...limits, outputBudget: defaultClaudeOutput } : limits,
       db.history(session.id, limits.turns),
       message,
       providers.contextWindow(session.provider, session.model) ?? null,
@@ -199,8 +200,8 @@ export function createChatServer(
             store?.startCall("catalog", { provider: option.id, model: "" }, null),
           ),
         );
-      } catch {
-        throw new RequestError(502, "catalog_unavailable");
+      } catch (error) {
+        throw new RequestError(502, error instanceof ProviderError && error.code === "provider_auth" ? "provider_auth" : "catalog_unavailable");
       }
     }
     if (path === "/api/settings/display-rules" && store) {
@@ -318,7 +319,7 @@ export function createChatServer(
             throw new RequestError(400, "invalid_model");
         }
         const preferred = providers.options.find(o =>
-          (o.id === "openrouter" || o.id === "openai" || o.id === "gemini") && o.enabled &&
+          (o.id !== "mock" && o.id !== "custom") && o.enabled &&
           isModelSelection({ provider: o.id, model: o.defaultModel }),
         );
         const selection = preferred && { provider: preferred.id, model: preferred.defaultModel };

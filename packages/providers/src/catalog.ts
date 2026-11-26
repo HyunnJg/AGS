@@ -1,3 +1,5 @@
+import { responseError } from "./errors.ts";
+import { providerHeaders } from "./headers.ts";
 import { callStatus, type CallCapture } from "./capture.ts";
 import { isModelSelection, type CatalogModel, type ProviderId } from "../../contracts/src/providers.ts";
 
@@ -22,20 +24,18 @@ export function createCatalog(
         const path = new URL("models", url);
         const native = provider === "gemini";
         if (native) path.searchParams.set("pageSize", "1000");
-        if (pageToken) path.searchParams.set("pageToken", pageToken);
+        if (pageToken) path.searchParams.set(provider === "anthropic" ? "after_id" : "pageToken", pageToken);
         const response = await send(path.href, {
           redirect: "error",
           signal,
           headers: {
             accept: "application/json",
-            ...(key && (native ? { "x-goog-api-key": key } : { authorization: `Bearer ${key}` })),
+            ...providerHeaders(provider, key),
           },
         });
         capture?.response(response);
         if (!response.ok || !response.body) {
-          if (capture) await capture.errorBody(response.body);
-          else await response.body?.cancel();
-          throw new Error("catalog_unavailable");
+          throw await responseError(provider, response, capture);
         }
         const buffers: Uint8Array[] = [];
         for await (const chunk of response.body) {
@@ -61,7 +61,7 @@ export function createCatalog(
           const id = native ? item.name.slice(7) : item?.id;
           if (!isModelSelection({ provider, model: id }) || models.has(id) || (key && id.includes(key)))
             continue;
-          const label = native ? item.displayName : item.name;
+          const label = native ? item.displayName : provider === "anthropic" ? item.display_name : item.name;
           const name = typeof label === "string" && !(key && label.includes(key)) ? label.slice(0, 256) : id;
           // Gemini publishes separate input/output limits, not a combined context window.
           const contextLength =
@@ -71,6 +71,10 @@ export function createCatalog(
           models.set(id, { id, name, ...(contextLength && { contextLength }) });
         }
         pageToken = native ? (payload.nextPageToken ?? "") : "";
+        if (provider === "anthropic" && payload.has_more) {
+          if (!payload.last_id) throw new Error("invalid_catalog_cursor");
+          pageToken = payload.last_id;
+        }
         if (typeof pageToken !== "string" || seen.has(pageToken)) throw new Error("invalid_catalog_cursor");
         seen.add(pageToken);
         capture?.finish("completed");

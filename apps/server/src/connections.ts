@@ -9,7 +9,7 @@ import {
 } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, customEndpoint, officialBaseUrls } from "../../../packages/providers/src/compatible.ts";
 
-const ids = ["custom", "openrouter", "openai", "gemini"] as const;
+const ids = ["custom", "openrouter", "openai", "gemini", "anthropic"] as const;
 const windows = process.platform === "win32";
 
 interface RecordData {
@@ -21,22 +21,29 @@ interface RecordData {
   encrypted?: string;
 }
 
-function dpapi(operation: "Protect" | "Unprotect", input: string) {
-  const script = [
-    "$ErrorActionPreference='Stop'",
-    "Add-Type -AssemblyName System.Security",
-    "$bytes=[Convert]::FromBase64String([Console]::In.ReadToEnd())",
-    "$scope=[Security.Cryptography.DataProtectionScope]::CurrentUser",
-    `$result=[Security.Cryptography.ProtectedData]::${operation}($bytes,$null,$scope)`,
-    "[Console]::Write([Convert]::ToBase64String($result))",
-  ].join("; ");
+function dpapi(operation: "Protect" | "Unprotect", values: string[]): string[] {
+  // Each input line is one base64 value. Preserve its position even if one old key is unreadable.
+  const script = `
+    $ErrorActionPreference='Stop'
+    Add-Type -AssemblyName System.Security
+    $scope=[Security.Cryptography.DataProtectionScope]::CurrentUser
+    while ($null -ne ($line=[Console]::In.ReadLine())) {
+      try {
+        $bytes=[Convert]::FromBase64String($line)
+        $result=[Security.Cryptography.ProtectedData]::${operation}($bytes,$null,$scope)
+        [Console]::WriteLine([Convert]::ToBase64String($result))
+      } catch { [Console]::WriteLine('-') }
+    }`;
   const result = spawnSync(
     join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
     ["-NoProfile", "-NonInteractive", "-Command", script],
-    { input, encoding: "utf8", timeout: 10000, windowsHide: true },
+    { input: values.join("\n"), encoding: "utf8", timeout: 10000, windowsHide: true },
   );
   if (result.status !== 0 || !result.stdout) throw new Error("key_storage_failed");
-  return result.stdout;
+  const lines = result.stdout.trimEnd().split(/\r?\n/);
+  if (lines.length !== values.length || (operation === "Protect" && lines.includes("-")))
+    throw new Error("key_storage_failed");
+  return lines;
 }
 
 export class ConnectionError extends Error {
@@ -62,12 +69,21 @@ export class Connections {
       if (!existsSync(path)) continue;
       const record: RecordData = JSON.parse(readFileSync(path, "utf8"));
       this.records.set(id, record);
-      if (windows && record.source === "supplied" && record.encrypted) {
-        try {
-          this.keys.set(id, Buffer.from(dpapi("Unprotect", record.encrypted), "base64").toString("utf8"));
-        } catch {
-          // A copied profile can still open AGS and replace its unavailable key.
-        }
+    }
+    const encrypted = [...this.records].flatMap(([id, record]) =>
+      record.source === "supplied" && record.encrypted && /^[A-Za-z0-9+/]+=*$/.test(record.encrypted)
+        ? [{ id, value: record.encrypted }]
+        : [],
+    );
+    if (windows && encrypted.length) {
+      try {
+        const keys = dpapi("Unprotect", encrypted.map(item => item.value));
+        encrypted.forEach(({ id }, index) => {
+          const value = keys[index];
+          if (value && value !== "-") this.keys.set(id, Buffer.from(value, "base64").toString("utf8"));
+        });
+      } catch {
+        // Keep the settings available for key replacement if DPAPI cannot start.
       }
     }
     this.adapters = this.configure();
@@ -155,8 +171,11 @@ export class Connections {
     if (input !== undefined || baseUrl !== old.baseUrl) {
       record.source = typeof input === "string" ? "supplied" : "none";
       delete record.encrypted;
-      if (windows && typeof input === "string")
-        record.encrypted = dpapi("Protect", Buffer.from(input).toString("base64"));
+      if (windows && typeof input === "string") {
+        const [encrypted] = dpapi("Protect", [Buffer.from(input).toString("base64")]);
+        if (!encrypted) throw new Error("key_storage_failed");
+        record.encrypted = encrypted;
+      }
     }
     const dest = this.path(id);
     const temp = `${dest}.${randomUUID()}.tmp`;

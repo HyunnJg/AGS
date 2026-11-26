@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -71,4 +71,19 @@ test("OpenAI 연결은 독립 설정을 저장하고 재시작 후 원래 모델
   assert.equal(restored.view("openrouter").hasKey, true);
   restored.save("openai", { ...restored.view("openai"), key: null });
   assert.equal(new Connections(dir, env).view("openai").hasKey, false);
+});
+
+test("Windows 일괄 키 복원은 손상된 항목만 건너뛴다", { skip: process.platform !== "win32" }, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-dpapi-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const first = new Connections(dir, {});
+  for (const id of ["openai", "gemini", "anthropic"] as const)
+    first.save(id, { ...first.view(id), key: `fixture-${id}`, defaultModel: "fixture" });
+  const path = join(dir, "connection-gemini.json");
+  const record = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify({ ...record, encrypted: "YWJjZA==" }));
+  const next = new Connections(dir, {});
+  assert.equal(next.view("anthropic").hasKey, true);
+  assert.equal(next.view("openai").hasKey, true);
+  assert.equal(next.view("gemini").needsKey, true);
 });

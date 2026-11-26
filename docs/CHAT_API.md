@@ -53,7 +53,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 ### 컨텍스트와 공용 지침
 
 - `GET /api/sessions/{id}/context`와 `PUT`은 대화별 `{turns,inputBudget,outputBudget}`를 읽고 저장한다. 기존 대화의 기본값은 `{turns:12,inputBudget:null,outputBudget:null}`이다. 예산은 양의 정수이며 빈 한도는 null로 보낸다.
-- `POST /api/sessions/{id}/context-preview`는 `{message,limits}`를 받아 실제 전송과 동일한 조립 코드로 메시지를 생성한다. 공급자 호출이나 대화 기록 쓰기는 없다. 이전 턴은 사용자·응답 쌍 단위로 포함한다. 입력량은 메시지별 UTF-8 바이트 수 + 8로 추정하며 공급자 사용량과 다를 수 있다. 모델 목록에서 해당 모델의 컨텍스트 길이를 알고 있으면 그 범위에서 지정 출력량을 예약한다. 필수 입력이 예산을 넘으면 미리보기의 `fits`는 false이며 전송은 422로 거절한다. 출력 한도는 설정된 경우에만 전달한다. OpenAI 직접 연결은 `max_completion_tokens`, Gemini는 `generationConfig.maxOutputTokens`, 나머지 호환 공급자는 `max_tokens`를 쓴다.
+- `POST /api/sessions/{id}/context-preview`는 `{message,limits}`를 받아 실제 전송과 동일한 조립 코드로 메시지를 생성한다. 공급자 호출이나 대화 기록 쓰기는 없다. 이전 턴은 사용자·응답 쌍 단위로 포함한다. 입력량은 메시지별 UTF-8 바이트 수 + 8로 추정하며 공급자 사용량과 다를 수 있다. 모델 목록에서 해당 모델의 컨텍스트 길이를 알고 있으면 그 범위에서 지정 출력량을 예약한다. 필수 입력이 예산을 넘으면 미리보기의 `fits`는 false이며 전송은 422로 거절한다. Anthropic은 미지정 일반 채팅에 4,096토큰을 예약해 미리보기와 전송에 적용한다. 다른 공급자는 출력 한도가 설정된 경우에만 전달한다. OpenAI 직접 연결은 `max_completion_tokens`, Gemini는 `generationConfig.maxOutputTokens`, 나머지 호환 공급자는 `max_tokens`를 쓴다.
 - `GET /api/settings/prompt`는 `{prompt,order}`를 반환한다. `PUT`에 `{prompt,previous}`를 보내면 최대 4,000자의 전역 지침을 저장한다. 다른 창이 먼저 수정해 기존 값이 달라지면 409를 반환한다. 순서도 변경할 때는 기존 previous와 함께 order 및 previousOrder를 보낸다. memory, history, retrieval, input을 각각 한 번 포함해야 하며 지침과 순서는 함께 저장한다. 인증·접근 권한은 서버 측에서 별도로 검증한다.
 - `GET /api/sessions/{id}/sources`와 `PUT`은 세션별 수동 참고 자료 `{memory,retrieval,revision}`를 읽고 저장한다. 저장할 때 읽은 revision이 달라지면 409다. 각 자료는 최대 6,000자이다. 참고 자료는 user 역할로 전달하고, 완료 턴은 원래 역할로 전달한다.
 - 미리보기의 blocks는 messages와 같은 순서의 출처 목록이다. 고정 지침과 현재 입력의 예산을 먼저 확보하고 남은 예산을 설정 순서대로 사용한다. 빈 블록은 생략하며, excluded는 예산 때문에 일부 또는 전부 생략된 블록이다.
@@ -102,10 +102,12 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 
 ### 공급자 연결 설정
 
-인증된 `GET /api/settings/connections/{openrouter|openai|gemini|custom}`은 `revision`, `baseUrl`, `defaultModel`, 키 등록 여부(`hasKey`), 재입력 필요 여부(`needsKey`), 입력 키의 재시작 후 유지 여부(`persistentKeys`)를 반환한다. `PUT` 본문에는 읽은 revision과 새 baseUrl, defaultModel을 보낸다. OpenRouter, OpenAI, Gemini는 공급자별 고정 주소를 사용한다. OpenAI는 `https://api.openai.com/v1/` 아래의 `models`와 `chat/completions`를 호출한다. 선택 필드 key를 생략하면 기존 키를 유지하고, 문자열로 교체하거나 null로 제거한다. 기존 키가 있을 때 사용자 지정 주소를 바꾸려면 키 교체 또는 제거를 명시해야 한다. 성공 응답은 갱신된 view와 공급자 options이며 오래된 revision은 409다. 공급자 키 원문은 응답에 포함하지 않는다.
+인증된 `GET /api/settings/connections/{openrouter|openai|gemini|anthropic|custom}`은 `revision`, `baseUrl`, `defaultModel`, 키 등록 여부(`hasKey`), 재입력 필요 여부(`needsKey`), 입력 키의 재시작 후 유지 여부(`persistentKeys`)를 반환한다. `PUT` 본문에는 읽은 revision과 새 baseUrl, defaultModel을 보낸다. OpenRouter, OpenAI, Gemini, Anthropic은 공급자별 고정 주소를 사용한다. OpenAI는 `https://api.openai.com/v1/` 아래의 `models`와 `chat/completions`를 호출한다. 선택 필드 key를 생략하면 기존 키를 유지하고, 문자열로 교체하거나 null로 제거한다. 기존 키가 있을 때 사용자 지정 주소를 바꾸려면 키 교체 또는 제거를 명시해야 한다. 성공 응답은 갱신된 view와 공급자 options이며 오래된 revision은 409다. 공급자 키 원문은 응답에 포함하지 않는다.
 
 
 Gemini는 전용 키를 `x-goog-api-key` 헤더로 보내며 `v1beta/models`에서 `generateContent` 지원 모델을 페이지별로 조회한다. 각 HTTP 응답은 별도 호출 로그로 기록한다. 텍스트 호출은 `models/{id}:streamGenerateContent?alt=sse`를 사용한다. 요청 요약의 메시지 수는 AGS의 입력 메시지(시스템 지침 포함) 기준이다. 같은 역할의 연속 메시지는 Google 요청에서 순서대로 한 턴의 여러 텍스트 파트가 된다. 최종 답변에는 첫 후보의 일반 텍스트만 들어가며, 공급자가 반환한 사용량 등은 원본 SSE에 남는다.
+
+Anthropic은 워크스페이스 전용 키를 Bearer 헤더로 전송한다. `anthropic-version: 2026-10-21`을 사용하며 `GET /v1/models`의 `has_more` 및 `last_id`로 다음 페이지를 읽는다. `POST /v1/messages`는 상위 `system`, 순서대로 나열한 사용자·어시스턴트 메시지, 명시적 `max_tokens`와 스트리밍 옵션을 보낸다. 텍스트 블록의 내용을 표시하고 원본 이벤트·사용량은 호출 로그에 남긴다.
 
 ### 외부 지식 발췌
 
