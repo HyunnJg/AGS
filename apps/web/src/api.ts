@@ -10,6 +10,8 @@ import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 const workspaceMessages: Record<string, string> = {
   search_cancelled: "검색이 중단됐습니다.",
   no_workspace_folder: "연결된 작업 폴더가 없습니다.",
+  invalid_state_file: "첫 줄부터 전체가 보이는 80줄·6,000자 이내의 상태 파일을 선택하세요.",
+  state_source_changed: "섹션의 지정 파일이 바뀌었습니다. 작업공간을 다시 열어 확인하세요.",
   invalid_search: "검색할 문구를 확인하세요.",
   reference_too_large: "6,000자 이하로 줄 범위를 좁혀 주세요. 화면에서 잘린 긴 줄은 첨부할 수 없습니다.",
   reference_limit: "대화에 첨부한 자료가 8개입니다. 기존 자료를 뺀 뒤 다시 첨부하세요.",

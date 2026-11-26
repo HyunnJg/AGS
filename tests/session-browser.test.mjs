@@ -17,6 +17,7 @@ test(
     const dir = await mkdtemp(join(tmpdir(), "ags-browser-"));
     const token = randomBytes(32).toString("hex");
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
+    let statePayload;
     const fake = createServer(async (req, res) => {
       if (req.url === "/v1/models") {
         res.writeHead(200, { "content-type": "application/json" }).end(
@@ -32,6 +33,12 @@ test(
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString());
+      if (payload.messages.some((m) => m.content === "섹션 복원 검증")) {
+        statePayload = payload.messages;
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"choices":[{"delta":{"content":"복원 확인"}}]}\n\ndata: [DONE]\n\n');
+        return;
+      }
       assert.equal(payload.model, "ui/test-model");
       assert.equal(payload.max_tokens, 123);
       assert.equal(payload.messages.length, 4);
@@ -480,6 +487,43 @@ test(
     assert.ok(writes.some((r) => r.action === "create" && r.path === "notes/result.md" && !r.error));
     const changedFile = writes.find((r) => r.action === "write" && r.path === "notes/intro.md" && !r.error);
     assert.equal(await readFile(join(dir, "backups", changedFile.backup), "utf8"), before);
+    await panel.getByRole("button", { name: "상위 폴더" }).click();
+    await panel.getByRole("button", { name: "상위 폴더" }).click();
+    await panel.getByRole("button", { name: "STATUS.md", exact: true }).click();
+    await panel.getByText("섹션 현재 상태", { exact: true }).click();
+    await panel.getByRole("button", { name: "현재 파일을 상태로 지정" }).click();
+    await panel.getByText("섹션 현재 상태 · STATUS.md", { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "섹션에서 새 대화" }).click();
+    await panel.waitFor({ state: "hidden" });
+    const freshId = await page.evaluate(() => sessionStorage.getItem("ags-session"));
+    assert.notEqual(freshId, sessionId);
+    const freshPath = `${base}/api/sessions/${freshId}`;
+    const previewState = async () => (await page.request.post(`${freshPath}/context-preview`, {
+      headers, data: { message: "섹션 복원 검증", limits: { turns: 0,inputBudget:null, outputBudget:null } },
+    })).json();
+    const restored = await previewState();
+    assert.equal(restored.includedTurns, 0);
+    assert.ok(restored.messages.some((m,i) => restored.blocks[i] === "memory" && m.content.includes("발굴 조사 연표")));
+    assert.equal((await page.request.patch(freshPath, {headers, data:{provider:"custom",model:"ui/test-model"}})).status(),200);
+    assert.equal((await page.request.post(`${freshPath}/chat`,{headers,data:{message:"섹션 복원 검증"}})).status(),200);
+    assert.deepEqual(statePayload, restored.messages);
+    await page.getByRole("button", {name:"설정", exact:true}).click();
+    await page.getByRole("button", {name:"토글형 모듈"}).click();
+    const toggle = page.getByLabel("섹션 기억 참조");
+    const flip = async () => {
+      const changed = page.waitForResponse(r => r.url().endsWith("/settings/section-memory") && r.request().method()==="PUT");
+      await toggle.click();
+      assert.equal((await changed).status(), 200);
+    };
+    await flip();
+    assert.ok(!(await previewState()).messages.some(m=>m.content.includes("발굴 조사 연표")));
+    await flip();
+    await page.getByRole("button", {name:"설정 닫기"}).click();
+    await writeFile(join(example,"STATUS.md"), "확인하지 않은 새 내용");
+    const outdated = await previewState();
+    assert.equal(outdated.stateStale, true);
+    assert.ok(!outdated.messages.some(m=>m.content.includes("발굴 조사 연표") || m.content.includes("확인하지 않은 새 내용")));
+    await openWorkspace();
     const noToken = await page.request.post(`${projectPath}/entries`, { data: { path: "" } });
     assert.equal(noToken.status(), 401);
     const searchData = { path: "", query: "근거" };

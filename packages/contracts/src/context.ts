@@ -44,7 +44,9 @@ export interface Message {
   role: "system" | "user" | "assistant";
   content: string;
 }
+export const staleStateMessage = "섹션 상태 파일이 바뀌었거나 열 수 없어 이번 입력에서 제외했습니다. 프로젝트에서 원본을 연 뒤 다시 지정하세요.";
 export interface ContextPreview {
+  stateStale?: boolean;
   messages: Message[];
   blocks: ("system" | Block)[];
   excluded: Block[];

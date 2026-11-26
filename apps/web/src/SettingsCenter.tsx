@@ -1,3 +1,4 @@
+import { SectionMemorySetting } from "./SectionMemory.tsx";
 import { DisplayRules } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { SharedPrompt } from "./PromptLayout.tsx";
@@ -263,8 +264,8 @@ export function SettingsCenter({
               <button
                 type="button"
                 key={item}
-                disabled={item !== "모델" && item !== "고급 기능"}
-                title={item === "모델" || item === "고급 기능" ? undefined : "연결 예정"}
+                disabled={!["모델", "고급 기능", "토글형 모듈"].includes(item)}
+                title={["모델", "고급 기능", "토글형 모듈"].includes(item) ? undefined : "연결 예정"}
                 aria-pressed={section === item}
                 onClick={() => setSection(item)}
               >
@@ -283,7 +284,7 @@ export function SettingsCenter({
               ))}
             </fieldset>
           ) : (
-            <h3>로컬 서버</h3>
+            <h3>{section === "토글형 모듈" ? section : "로컬 서버"}</h3>
           )}
           {section === "모델" && tab === "정규식" ? (
             <DisplayRules token={token} onSaved={onRulesSaved} />
@@ -345,6 +346,8 @@ export function SettingsCenter({
                 </button>
               </footer>
             </form>
+          ) : section === "토글형 모듈" ? (
+            <SectionMemorySetting token={token} />
           ) : (
             <Runtime token={token} />
           )}

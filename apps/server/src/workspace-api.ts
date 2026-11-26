@@ -1,3 +1,4 @@
+import { stateText } from "./section-state.ts";
 import { workspaceWrite } from "./workspace-writes.ts";
 import { maxReferenceChars } from "../../../packages/contracts/src/workspace.ts";
 import type { IncomingMessage } from "node:http";
@@ -21,7 +22,7 @@ export async function workspaceApi(
   allow: (methods: string) => void,
 ) {
   const route =
-    /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity|attach|edit|propose|approve))?$/.exec(
+    /^\/api\/projects(?:\/([a-f0-9-]{36})\/(sections|root|entries|file|search|activity|attach|state-source|edit|propose|approve))?$/.exec(
       path,
     );
   if (!route) throw new WorkspaceError(404, "unknown_route");
@@ -79,6 +80,23 @@ export async function workspaceApi(
       if (current?.root !== root.path || current.identity !== root.identity)
         throw new WorkspaceError(409, "folder_changed");
     };
+    if (action === "state-source") {
+      if (
+        !("section" in body) ||
+        typeof body.section !== "string" ||
+        !("root" in body) ||
+        !("previous" in body) ||
+        !(body.previous === null || typeof body.previous === "string") ||
+        !("version" in body) ||
+        !(body.version === null || (typeof body.version === "string" && /^[a-f0-9]{64}$/.test(body.version)))
+      )
+        throw new WorkspaceError(400, "invalid_state_file");
+      if (body.version !== null) await stateText(root, body.path, body.version);
+      checkActive();
+      if (!store.setStateSource(id, body.section, body.previous, body.path, body.version))
+        throw new WorkspaceError(409, "state_source_changed");
+      return json({ saved: true });
+    }
     if (action === "attach") {
       if (!("session" in body) || typeof body.session !== "string" || !store.get(body.session))
         throw new WorkspaceError(404, "unknown_session");

@@ -5,6 +5,9 @@ export interface Project {
   root: string | null;
 }
 export interface Section {
+  stateKey: string | null;
+  statePath: string | null;
+  stateVersion: string | null;
   id: string;
   projectId: string;
   name: string;
