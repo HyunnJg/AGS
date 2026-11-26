@@ -1,6 +1,6 @@
 import { CallCapture } from "../../../packages/providers/src/capture.ts";
 import type { CallKind, CallLog, CallSummary } from "../../../packages/contracts/src/calls.ts";
-import type { Review } from "../../../packages/contracts/src/reviews.ts";
+import type { Review, ReviewHistoryItem } from "../../../packages/contracts/src/reviews.ts";
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
 import type { Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
@@ -127,6 +127,9 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 3) {
         this.db.exec("ALTER TABLE file_references ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'; PRAGMA user_version=4");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 4) {
+        this.db.exec("ALTER TABLE reviews ADD COLUMN selectionKey TEXT; PRAGMA user_version=5");
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -321,7 +324,15 @@ export class SessionStore {
       FROM reviews r JOIN turns t ON r.id=t.id WHERE r.requester=? AND (? IS NULL OR r.id=?)
       ORDER BY r.rowid DESC LIMIT 1`).get(requester,id ?? null,id ?? null) as unknown as Review | undefined;
   }
-  startReview(requester: string, id: string, target: ModelSelection, message: string) {
+  reviewHistory(requester: string) {
+    return this.db.prepare(`SELECT t.id,t.session_id AS reviewer,substr(t.message,1,48) AS title,t.status,t.provider,t.model
+      FROM reviews r JOIN turns t ON r.id=t.id WHERE r.requester=? ORDER BY r.rowid DESC`)
+      .all(requester) as unknown as ReviewHistoryItem[];
+  }
+  reviewSelectionKey(id: string) {
+    return this.db.prepare("SELECT selectionKey FROM reviews WHERE id=?").get(id)?.selectionKey ?? null;
+  }
+  startReview(requester: string, id: string, target: ModelSelection, message: string, selectionKey: string | null = null) {
     if (this.db.prepare("SELECT 1 FROM turns WHERE id=?").get(id)) throw new WorkspaceError(409, "review_id_conflict");
     if (this.review(requester)?.status === "streaming") throw new WorkspaceError(409, "review_busy");
     this.db.exec("BEGIN");
@@ -330,7 +341,7 @@ export class SessionStore {
       this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(`검토 · ${Array.from(message).slice(0,24).join("")}`, reviewer.id);
       this.db.prepare(`INSERT INTO turns(id,session_id,message,status,preset,provider,model)
         VALUES(?,?,?,'streaming','general',?,?)`).run(id,reviewer.id,message,target.provider,target.model);
-      this.db.prepare("INSERT INTO reviews(id,requester) VALUES(?,?)").run(id,requester);
+      this.db.prepare("INSERT INTO reviews(id,requester,selectionKey) VALUES(?,?,?)").run(id,requester,selectionKey);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

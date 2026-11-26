@@ -189,11 +189,10 @@ function KnowledgeVersion({ token, route }: { token: string; route: string }) {
   );
 }
 
-export function AttachedReferences({ token, session }: { token: string; session: string }) {
+export function useFileReferences(token: string, session: string) {
   const [refs, setRefs] = useState<FileReference[]>([]),
     [error, setError] = useState("");
   const route = `/api/sessions/${session}/references`;
-  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     let pending: AbortController | undefined;
     async function load() {
@@ -224,6 +223,15 @@ export function AttachedReferences({ token, session }: { token: string; session:
       window.removeEventListener("focus", load);
     };
   }, [route, session, token]);
+  return { refs, error, setError };
+}
+
+export function AttachedReferences({ token, session, references }: {
+  token: string; session: string; references: ReturnType<typeof useFileReferences>;
+}) {
+  const route = `/api/sessions/${session}/references`;
+  const { refs, error, setError } = references;
+  const [expanded, setExpanded] = useState(false);
   async function remove(id: string) {
     try {
       await api(token, `${route}/${id}`, "DELETE");

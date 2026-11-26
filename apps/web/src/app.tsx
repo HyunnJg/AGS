@@ -1,7 +1,7 @@
 import { ReviewEditor } from "./ReviewEditor.tsx";
 import { CheckpointEditor } from "./CheckpointEditor.tsx";
 import { staleStateMessage, memoryUseLabel } from "../../../packages/contracts/src/context.ts";
-import { AttachedReferences } from "./FileReferences.tsx";
+import { AttachedReferences, useFileReferences } from "./FileReferences.tsx";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -107,7 +107,7 @@ function Conversation({
   favorites: ModelSelection[];
   displayRules: DisplayRule[];
   options: ProviderOption[];
-  onReviewer: (id: string) => void;
+  onReviewer: (id: string, open?: boolean) => void;
   onRemoteActivity: (id: string, active: boolean) => void;
   text: string;
   setText: (value: string) => void;
@@ -120,6 +120,7 @@ function Conversation({
     if (o.enabled && o.defaultModel && !reviewChoices.some(c => c.provider === o.id && c.model === o.defaultModel))
       reviewChoices.push({ provider: o.id, model: o.defaultModel });
   }
+  const references = useFileReferences(token, session.id);
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [ready, setReady] = useState(false);
@@ -304,12 +305,12 @@ function Conversation({
       </div>
       <div className="composer">
         <ReviewEditor token={token} session={session}
-          choices={reviewChoices}
+          choices={reviewChoices} references={references.refs}
           lastReply={turns.findLast(t=>t.status==="completed")?.reply ?? ""}
           insert={value=>setText(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
         {session.sectionId && <CheckpointEditor token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
-        <AttachedReferences token={token} session={session.id} />
+        <AttachedReferences token={token} session={session.id} references={references} />
         <form onSubmit={send}>
           <textarea
             disabled={!ready}
@@ -555,10 +556,11 @@ function Workspace({ token }: { token: string }) {
             visible={current.id === id}
             text={drafts[current.id] ?? ""}
             setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
-            onReviewer={async reviewer => {
+            onReviewer={async (reviewer, open) => {
               try {
                 const data = await (await api(token,`/api/sessions/${reviewer}`)).json();
                 setSessions(prev => [data.session,...prev.filter(s=>s.id!==reviewer)]);
+                if (open) select(reviewer);
               } catch (e) { setError(problem(e)); }
             }}
             onRemoteActivity={onRemoteActivity}

@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { providerNames, type ModelSelection } from "../../../packages/contracts/src/providers.ts";
 import {
   reviewInputLimit,
+  reviewMessage,
+  type ReviewHistoryItem,
   reviewOutputTokens,
   type Review,
 } from "../../../packages/contracts/src/reviews.ts";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
-import type { Project, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
+import type { FileReference, Project, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import { api } from "./api.ts";
 import { FileWrite } from "./FileWrite.tsx";
 
@@ -87,6 +89,7 @@ export function ReviewEditor({
   token,
   session,
   choices,
+  references,
   lastReply,
   insert,
   onCreated,
@@ -94,9 +97,10 @@ export function ReviewEditor({
   token: string;
   session: Session;
   choices: ModelSelection[];
+  references: FileReference[];
   lastReply: string;
   insert: (value: string) => void;
-  onCreated: (id: string) => void;
+  onCreated: (id: string, open?: boolean) => void;
 }) {
   const route = `/api/sessions/${session.id}/review`;
   const [open, setOpen] = useState(false);
@@ -105,9 +109,14 @@ export function ReviewEditor({
   const [message, setMessage] = useState("");
   const [selection, setSelection] = useState(JSON.stringify(["mock", ""]));
   const [review, setReview] = useState<Review | null>(null);
+  const [history, setHistory] = useState<ReviewHistoryItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selected = selectedIds.flatMap((id) => references.filter((r) => r.id === id && !r.paused));
+  const missing = selected.length !== selectedIds.length;
+  const preview = reviewMessage(message, selected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [latest, refresh] = useState({route});
+  const [latest, refresh] = useState({ route });
   const controller = useRef<AbortController | null>(null);
   const attempt = useRef<{ key: string; id: string } | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
@@ -117,9 +126,13 @@ export function ReviewEditor({
     let timer: ReturnType<typeof setTimeout>;
     async function load() {
       try {
-        const r = await (await api(token, latest.route, "GET", undefined, c.signal)).json();
+        const [r, items] = await Promise.all([
+          api(token, latest.route, "GET", undefined, c.signal).then((res) => res.json()),
+          api(token, `${latest.route}/history`, "GET", undefined, c.signal).then((res) => res.json()),
+        ]);
         if (!c.signal.aborted) {
           setReview(r);
+          setHistory(items);
           if (r && attempt.current?.id === r.id && r.status !== "streaming") attempt.current = null;
           if (r?.status === "streaming") timer = setTimeout(load, 1000);
         }
@@ -156,9 +169,9 @@ export function ReviewEditor({
     };
   }, [open, token, latest, session.sectionId, busy]);
   async function send() {
-    if (controller.current) return;
+    if (controller.current || missing || preview.length > reviewInputLimit) return;
     const [provider, model] = JSON.parse(selection);
-    const key = JSON.stringify([selection, message.trim()]);
+    const key = JSON.stringify([selection, message.trim(), selectedIds]);
     if (attempt.current?.key !== key) attempt.current = { key, id: crypto.randomUUID() };
     const c = new AbortController();
     controller.current = c;
@@ -175,11 +188,13 @@ export function ReviewEditor({
             target: { provider, model },
             message,
             approved: true,
+            referenceIds: selectedIds,
           },
           c.signal,
         )
       ).json();
       setReview(result);
+      setSelectedIds([]);
       onCreated(result.reviewer);
       attempt.current = null;
     } catch (e) {
@@ -198,7 +213,7 @@ export function ReviewEditor({
   const pending = busy || review?.status === "streaming";
   const available = choices.some((c) => JSON.stringify([c.provider, c.model]) === selection);
   return (
-    <details className="checkpoint-editor" onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details className="checkpoint-editor review-editor" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>다른 모델에 검토 요청</summary>
       {!enabled && <small>설정 → 토글형 모듈에서 AI 협업 허용을 켜세요.</small>}
       <fieldset disabled={!enabled || pending}>
@@ -232,11 +247,53 @@ export function ReviewEditor({
         >
           마지막 답변 추가
         </button>
+        {references.length > 0 && (
+          <fieldset>
+            <legend>함께 보낼 첨부 자료</legend>
+            {references.map((ref) => (
+              <label key={ref.id}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(ref.id)}
+                  disabled={ref.paused}
+                  onChange={() =>
+                    setSelectedIds((ids) =>
+                      ids.includes(ref.id) ? ids.filter((id) => id !== ref.id) : [...ids, ref.id],
+                    )
+                  }
+                />{" "}
+                {ref.kind === "knowledge" ? "지식 발췌" : "파일"} · {ref.project} / {ref.path} · {ref.start}–
+                {ref.end}줄{ref.paused && " · 참조 꺼짐"}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {missing && (
+          <p role="alert">
+            선택한 자료 중 사용할 수 없는 항목이 있습니다.{" "}
+            <button type="button" onClick={() => setSelectedIds(selected.map((ref) => ref.id))}>
+              사용 불가 항목 빼기
+            </button>
+          </p>
+        )}
+        {selected.length > 0 && (
+          <details>
+            <summary>보낼 내용 미리보기 · {preview.length.toLocaleString()} / 8,000자</summary>
+            <pre className="review-preview">{preview}</pre>
+          </details>
+        )}
+        {preview.length > reviewInputLimit && (
+          <small>자료를 빼거나 요청을 줄여 8,000자 이내로 맞춰 주세요.</small>
+        )}
         <small>
-          위 내용만 독립 대화에 한 번 보냅니다. 최대 출력 {reviewOutputTokens}토큰
+          작성한 요청과 선택한 발췌만 독립 대화에 한 번 보냅니다. 최대 출력 {reviewOutputTokens}토큰
           {selection !== JSON.stringify(["mock", ""]) ? " · API 사용료가 발생할 수 있습니다." : ""}
         </small>
-        <button type="button" disabled={!available || !message.trim()} onClick={() => void send()}>
+        <button
+          type="button"
+          disabled={!available || !message.trim() || missing || preview.length > reviewInputLimit}
+          onClick={() => void send()}
+        >
           승인하고 검토 요청
         </button>
       </fieldset>
@@ -252,12 +309,28 @@ export function ReviewEditor({
             type="button"
             onClick={() => {
               setError("");
-              refresh({route});
+              window.dispatchEvent(new CustomEvent("ags-file-references", { detail: session.id }));
+              refresh({ route });
             }}
           >
             상태 다시 확인
           </button>
         </p>
+      )}
+      {history.length > 0 && (
+        <details>
+          <summary>검토 이력 {history.length}건</summary>
+          <ul>
+            {history.map((item) => (
+              <li key={item.id}>
+                <button type="button" disabled={busy} onClick={() => onCreated(item.reviewer, true)}>
+                  {item.title.split("\n")[0]} · {providerNames[item.provider]} {item.model} ·{" "}
+                  {states[item.status]} · 대화 열기
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {review && (
         <ReviewResult
