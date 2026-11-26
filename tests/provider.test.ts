@@ -188,12 +188,23 @@ test(
     assert.equal((await call(langPath, "PUT", {language: "ja", previous: "auto"})).status, 200);
     assert.equal((await call(langPath, "PUT", {language: "ko", previous: "auto"})).status, 409);
     const presetsPath = "/api/settings/presets";
-    const definition = { name: "사료 검토", instructions: "Distinguish evidence from inference." };
-    const registered = await (await call(presetsPath, "POST", definition)).json();
+    const definition = { name: "사료 검토", instructions: "# Research\nDistinguish evidence from inference.\n" };
+    const registered = await (await call(presetsPath, "POST", {
+      ...definition, instructions: definition.instructions.replaceAll("\n", "\r\n"),
+    })).json();
+    assert.equal(registered.instructions, definition.instructions);
+    assert.deepEqual(await (await call(presetsPath, "POST", {
+      ...definition, instructions: definition.instructions.replaceAll("\n", "\r"),
+    })).json(), registered);
     assert.deepEqual(await (await call(presetsPath, "POST", definition)).json(), registered);
     assert.deepEqual(await (await call(presetsPath, "GET")).json(), [{id: registered.id, name: definition.name}]);
     assert.equal((await call(presetsPath, "POST", {...definition, instructions:" "})).status, 400);
     assert.equal((await call(presetsPath, "POST", {...definition, instructions:"new"})).status, 409);
+    const boundary = { name: "줄바꿈 한도", instructions: "x\r\n".repeat(4000) };
+    const atLimit = await call(presetsPath, "POST", boundary);
+    assert.equal(atLimit.status, 200);
+    assert.equal((await atLimit.json()).instructions.length, 8000);
+    assert.equal((await call(presetsPath, "POST", { ...boundary, instructions: `${boundary.instructions}x` })).status, 400);
     assert.equal((await call(path, "PATCH", {preset: "custom-00000000-0000-0000-0000-000000000000"})).status, 404);
     assert.equal((await call(path, "PATCH", {preset: registered.id})).status, 200);
     const callsBefore = requests.length;

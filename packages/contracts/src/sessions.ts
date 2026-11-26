@@ -23,12 +23,15 @@ export function isBuiltinPreset(value: unknown): value is BuiltinPreset {
 export function isPreset(value: unknown): value is Preset {
   return isBuiltinPreset(value) || isCustomPresetId(value);
 }
+export function normalizePresetText(text: string) {
+  return text.replace(/\r\n?/g, "\n");
+}
 export function isPresetDraft(value: unknown): value is Pick<CustomPreset, "name" | "instructions"> {
   if (!value || typeof value !== "object" || !("name" in value) || !("instructions" in value)) return false;
   const { name, instructions } = value;
   return typeof name === "string" && name.length <= maxPresetName && !!name.trim() &&
     name.isWellFormed() && !name.includes("\0") &&
-    typeof instructions === "string" && instructions.length <= maxPresetText && !!instructions.trim() &&
+    typeof instructions === "string" && normalizePresetText(instructions).length <= maxPresetText && !!instructions.trim() &&
     instructions.isWellFormed() && !instructions.includes("\0");
 }
 

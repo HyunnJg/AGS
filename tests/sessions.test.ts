@@ -47,6 +47,28 @@ test("중복 활성 턴을 막고 비정상 종료된 턴의 부분 텍스트와
   }
 });
 
+test("이전 CRLF 프리셋의 재등록은 기존 ID와 원본을 보존한다", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-preset-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "sessions.sqlite");
+  new SessionStore(path).close();
+  const old = new DatabaseSync(path);
+  const id = "custom-00000000-0000-4000-8000-000000000001";
+  const original = "# 원칙\r\n근거를 확인한다.\r\n";
+  old.prepare("INSERT INTO custom_presets VALUES(?,?,?)").run(id, "역사", original);
+  old.close();
+  const store = new SessionStore(path);
+  try {
+    const saved = store.addPreset("역사", "# 원칙\n근거를 확인한다.\n");
+    assert.equal(saved.id, id);
+    assert.equal(saved.instructions, original);
+    assert.throws(() => store.addPreset("역사", original.trimEnd()), /preset_name_taken/);
+    assert.equal(store.customPresets().length, 1);
+  } finally {
+    store.close();
+  }
+});
+
 test("프로젝트별 최신 파일 활동 100건을 재시작 뒤에도 유지한다", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ags-activity-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
