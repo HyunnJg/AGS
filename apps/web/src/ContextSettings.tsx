@@ -108,7 +108,7 @@ export function ContextSettings({
       </fieldset>
       <small>
         한글 한 글자는 보통 3바이트로 계산합니다. 입력은 UTF-8 바이트 수와 메시지 여유분으로 추정합니다.
-        예산을 넘으면 오래된 턴부터 제외합니다.
+        지침과 현재 입력의 공간을 먼저 확보한 뒤, 설정한 블록 순서에 따라 참고 자료와 최근 대화를 포함합니다.
       </small>
       <SourceEditor token={token} id={session.id} onSaved={() => setPreview(undefined)} />
       <footer>
@@ -125,6 +125,35 @@ export function ContextSettings({
           <strong>
             포함된 대화 {preview.includedTurns}턴 · 입력 약 {preview.estimatedInput.toLocaleString()}토큰
           </strong>
+          {preview.inputCeiling !== null && (
+            <small>
+              입력 한도 {preview.inputCeiling.toLocaleString()} · {preview.fits ? "남은 예산" : "입력 초과"}{" "}
+              약 {Math.abs(preview.inputCeiling - preview.estimatedInput).toLocaleString()}토큰
+            </small>
+          )}
+          <details className="block-budget">
+            <summary>블록별 입력 예산</summary>
+            <table aria-label="블록별 입력 예산">
+              <thead>
+                <tr>
+                  <th scope="col">블록</th>
+                  <th scope="col">추정 토큰</th>
+                  <th scope="col">포함 메시지</th>
+                  <th scope="col">예산으로 제외</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.blockUsage.map((row) => (
+                  <tr key={row.block}>
+                    <th scope="row">{row.block === "system" ? "고정 지침" : blockNames[row.block]}</th>
+                    <td>{row.estimatedTokens.toLocaleString()}</td>
+                    <td>{row.includedMessages}</td>
+                    <td>{row.omittedMessages}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
           {preview.modelWindow !== null && (
             <small>
               모델 컨텍스트 {preview.modelWindow.toLocaleString()}토큰 ·{" "}

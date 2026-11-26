@@ -64,7 +64,15 @@ export function memoryUseLabel(use: MemoryUse) {
     .filter(Boolean)
     .join(" · ");
 }
+export interface BlockUsage {
+  block: "system" | Block;
+  estimatedTokens: number;
+  includedMessages: number;
+  omittedMessages: number;
+}
 export interface ContextPreview {
+  inputCeiling: number | null;
+  blockUsage: BlockUsage[];
   memoryUse?: MemoryUse;
   stateStale?: boolean;
   messages: Message[];

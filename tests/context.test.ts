@@ -35,6 +35,12 @@ test("예산은 가장 최근의 완결된 턴부터 포함하고 지침·현재
   );
   assert.deepEqual(limited.messages, recent.messages);
   assert.equal(limited.includedTurns, 1);
+  assert.equal(limited.inputCeiling, recent.estimatedInput);
+  assert.equal(recent.inputCeiling, null);
+  assert.deepEqual(limited.blockUsage.find(row => row.block === "history"), {
+    block: "history", estimatedTokens: Buffer.byteLength("최근짧게") + 16, includedMessages: 2, omittedMessages: 2,
+  });
+  assert.equal(recent.blockUsage.find(row => row.block === "history")?.omittedMessages, 0);
   assert.equal(limited.messages.at(-1)?.content, message);
   assert.deepEqual(
     limited.messages[0]?.content,
@@ -49,6 +55,7 @@ test("예산은 가장 최근의 완결된 턴부터 포함하고 지침·현재
     recent.estimatedInput + output,
   );
   assert.deepEqual(windowed.messages, recent.messages);
+  assert.equal(windowed.inputCeiling, recent.estimatedInput);
   assert.equal(
     assembleContext("coding", prompt, { ...defaultLimits, outputBudget: output }, history, message, output)
       .fits,
@@ -107,6 +114,7 @@ test("고정 지침과 안정적인 앞부분은 초안 변경에도 같고 자�
     sources,
   );
   assert.deepEqual(small.excluded, ["retrieval"]);
+  assert.deepEqual(small.blockUsage.map(row => row.block), ["system", ...order]);
   assert.equal(small.fits, true);
 });
 
@@ -126,4 +134,7 @@ test("첨부 발췌는 예산을 넘으면 통째로 제외하고 수동 참고 
   );
   assert.deepEqual(limited.messages, normal.messages);
   assert.deepEqual(limited.excluded, ["retrieval"]);
+  assert.equal(limited.blockUsage.find(row => row.block === "retrieval")?.omittedMessages, 1);
+  assert.equal(limited.blockUsage.find(row => row.block === "retrieval")?.includedMessages, 1);
+  assert.equal(limited.blockUsage.reduce((sum, row) => sum + row.estimatedTokens, 0), limited.estimatedInput);
 });

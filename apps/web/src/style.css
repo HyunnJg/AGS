@@ -575,6 +575,9 @@ header h2 {
 .context-preview summary {
   cursor: pointer;
 }
+.block-budget table { width: 100%; border-collapse: collapse; margin-block: .5rem; font-variant-numeric: tabular-nums; }
+.block-budget th, .block-budget td { padding: .3rem; border-bottom: 1px solid #d6ded4; text-align: end; }
+.block-budget th:first-child { text-align: start; }
 .context-preview pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
