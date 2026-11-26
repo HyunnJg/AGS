@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { configureProviders } from "../../../packages/providers/src/compatible.ts";
+import { Connections } from "./connections.ts";
 import { localPort } from "./port.ts";
 import { createChatServer } from "./server.ts";
 import { SessionStore } from "./sessions.ts";
@@ -17,15 +17,15 @@ try {
   const port = localPort(process.env.AGS_PORT);
   const directory = resolve(process.env.AGS_STATE_DIR || join(homedir(), ".ags", "private"));
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const providers = configureProviders(process.env);
+  const connections = new Connections(directory, process.env);
   const store = new SessionStore(join(directory, "sessions.sqlite"));
   const server = createChatServer(
     process.env.AGS_LOCAL_TOKEN ?? "",
     undefined,
     timeoutValue(process.env.AGS_IDLE_TIMEOUT_MS, 60_000),
     store,
-    providers,
-    { totalTimeoutMs: timeoutValue(process.env.AGS_TIMEOUT_MS, 600_000), stateDirectory: directory },
+    connections.adapters,
+    { totalTimeoutMs: timeoutValue(process.env.AGS_TIMEOUT_MS, 600_000), stateDirectory: directory, connections },
   );
   server.once("error", () => {
     store.close();

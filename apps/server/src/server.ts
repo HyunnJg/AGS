@@ -1,3 +1,4 @@
+import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
 import { workspaceApi } from "./workspace-api.ts";
@@ -66,9 +67,10 @@ export function createChatServer(
   timeoutMs = 60_000,
   store?: SessionStore,
   providers = configureProviders({}),
-  { totalTimeoutMs = 600_000, stateDirectory = "" } = {},
+  { totalTimeoutMs = 600_000, stateDirectory = "", connections }: { totalTimeoutMs?: number; stateDirectory?: string; connections?: Connections } = {},
 ) {
   if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) throw new Error("invalid_local_token");
+  if (connections) providers = connections.adapters;
   const authorization = Buffer.from(`Bearer ${token}`);
   const active = new Map<string, AbortController>();
 
@@ -149,6 +151,15 @@ export function createChatServer(
     if (path === "/api/providers") {
       if (req.method !== "GET") return allow("GET");
       return json(providers.options);
+    }
+    const connection = /^\/api\/settings\/connections\/(openrouter|custom)$/.exec(path);
+    if (connection && connections) {
+      const id = connection[1] === "openrouter" ? "openrouter" : "custom";
+      if (req.method === "GET") return json(connections.view(id));
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const view = connections.save(id, await readBody(req));
+      providers = connections.adapters;
+      return json({ view, options: providers.options });
     }
     const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models(\?refresh=1)?$/.exec(path);
     if (catalog) {
@@ -510,7 +521,7 @@ export function createChatServer(
     handle(req, res).catch((err: unknown) => {
       if (res.destroyed) return;
       if (res.headersSent) return res.destroy();
-      if (err instanceof RequestError || err instanceof WorkspaceError)
+      if (err instanceof RequestError || err instanceof WorkspaceError || err instanceof ConnectionError)
         rejectRequest(res, err.status, err.message);
       else rejectRequest(res, 500, "internal_error");
     });

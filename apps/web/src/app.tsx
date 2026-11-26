@@ -528,6 +528,7 @@ function Workspace({ token }: { token: string }) {
           streaming={running.includes(id) || Boolean(id && remoteId === id)}
           options={options}
           close={() => setSettings(false)}
+          onOptions={setOptions}
           onRulesSaved={setDisplayRules}
           save={applyModel}
         />

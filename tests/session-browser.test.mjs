@@ -19,6 +19,7 @@ test(
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
     const fake = createServer(async (req, res) => {
+      assert.equal(req.headers.authorization, "Bearer fixture-only");
       if (req.url === "/v1/models") {
         res.writeHead(200, { "content-type": "application/json" }).end(
           JSON.stringify({
@@ -82,9 +83,9 @@ test(
           AGS_LOCAL_TOKEN: token,
           AGS_OPENROUTER_API_KEY: "",
           AGS_OPENROUTER_MODEL: "",
-          AGS_CUSTOM_MODEL: "ui/test-model",
-          AGS_CUSTOM_API_KEY: "fixture-only",
-          AGS_CUSTOM_BASE_URL: `http://127.0.0.1:${fake.address().port}/v1`,
+          AGS_CUSTOM_MODEL: "",
+          AGS_CUSTOM_API_KEY: "",
+          AGS_CUSTOM_BASE_URL: "",
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -189,6 +190,13 @@ test(
     await page.locator("pre").filter({ hasText: "오래 걸리는 요청" }).waitFor();
     await page.getByRole("button", { name: "공급사 · 모델" }).click();
     await page.getByRole("button", { name: "사용자 지정 API", exact: true }).click();
+    await page.getByLabel("API 기본 주소").fill(`http://127.0.0.1:${fake.address().port}/v1`);
+    await page.getByLabel("기본 모델 ID").fill("ui/test-model");
+    await page.getByLabel("API 키", { exact: true }).fill("fixture-only");
+    await page.getByRole("button", { name: "연결 저장" }).click();
+    await page.getByText("연결 설정을 저장했습니다.").waitFor();
+    assert.equal(await page.getByLabel("API 키", { exact: true }).inputValue(), "");
+    assert.equal(await page.getByLabel("모델 ID", { exact: true }).inputValue(), "ui/test-model");
     await page.getByLabel("모델 검색").fill("Second");
     await page.getByRole("button", { name: "목록 새로고침" }).click();
     await page.getByRole("button", { name: /Second model/ }).click();
@@ -528,6 +536,17 @@ test(
     assert.equal(restored.memoryUse.summaries,1);
     assert.ok(restored.messages.some(m=>m.content.includes("다음: 자료 대조")));
     assert.ok(restored.messages.some((m,i) => restored.blocks[i] === "memory" && m.content.includes("발굴 조사 연표")));
+    const connectionPath = `${base}/api/settings/connections/custom`;
+    const connection = await (await page.request.get(connectionPath, { headers })).json();
+    assert.equal(connection.defaultModel, "ui/test-model");
+    assert.equal(connection.hasKey, process.platform === "win32");
+    if (!connection.hasKey) {
+      const restored = await page.request.put(connectionPath, {
+        headers, data: { revision: connection.revision, baseUrl: connection.baseUrl,
+          defaultModel: connection.defaultModel, key: "fixture-only" },
+      });
+      assert.equal(restored.status(), 200);
+    }
     assert.equal((await page.request.patch(freshPath, {headers, data:{provider:"custom",model:"ui/test-model"}})).status(),200);
     assert.equal((await page.request.post(`${freshPath}/chat`,{headers,data:{message:"섹션 복원 검증"}})).status(),200);
     assert.deepEqual(statePayload, restored.messages);

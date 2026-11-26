@@ -736,3 +736,16 @@ header h2 {
 .checkpoint-editor fieldset { display: grid; gap: .4rem; margin: .4rem 0; border: 0; padding: 0; }
 .checkpoint-editor textarea { width: 100%; }
 .checkpoint-editor small, .checkpoint-editor output { overflow-wrap: anywhere; }
+
+.provider-connection {
+  margin: 12px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #cbd7cc;
+  border-radius: 8px;
+}
+.provider-connection summary { cursor: pointer; font-weight: 600; }
+.provider-connection fieldset { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; border: 0; }
+.provider-connection button { justify-self: start; }
+.provider-connection .remove-provider-key { display: flex; align-items: center; gap: 6px; }
+.provider-connection .remove-provider-key input { width: auto; }
+.provider-connection output { display: block; margin-top: 8px; }

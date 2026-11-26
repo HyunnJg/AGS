@@ -99,3 +99,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 `POST /api/sessions/{id}/checkpoint`에 `{action:"draft",provider,model}`을 보내면 선택 모델과 승인형 작업 폴더를 확인한 뒤, 이 세션의 미기록 완료 턴을 오래된 순으로 최대 8개 사용한다. 생성 결과에는 편집할 summary, 출처 발췌(sources), 대상 파일(path), 원본 턴 식별자(first, last), 폴더 연결 식별값(binding)이 있다. 실패·초안 취소는 원본 턴과 진행 위치를 보존한다. `{action:"save",approved:true,first,last,binding,summary}`로 승인한다. 생성된 파일과 일치하는 저장 기록이 있어야 해당 구간을 처리한 것으로 본다.
 
 `GET/PUT /api/settings/memory-update`는 독립적인 전역 갱신 토글이며 `{enabled}`를 사용한다. 참조가 켜졌을 때 최근 승인된 파일 최대 3개의 버전을 확인하고 각각 독립된 memory 블록으로 예산에 포함한다. 미리보기의 memoryUse와 섹션 채팅 응답 헤더 x-ags-memory-use에는 상태 파일 포함 여부와 포함·원본 변경·예산 제외 건수가 있다. 각 요약 원본을 수정하거나 삭제하면 해당 버전은 입력에서 빠진다.
+
+### 공급자 연결 설정
+
+인증된 `GET /api/settings/connections/{openrouter|custom}`은 `revision`, `baseUrl`, `defaultModel`, 키 등록 여부(`hasKey`), 재입력 필요 여부(`needsKey`), 입력 키의 재시작 후 유지 여부(`persistentKeys`)를 반환한다. `PUT` 본문에는 읽은 revision과 새 baseUrl, defaultModel을 보낸다. OpenRouter는 고정 주소를 사용한다. 선택 필드 key를 생략하면 기존 키를 유지하고, 문자열로 교체하거나 null로 제거한다. 기존 키가 있을 때 사용자 지정 주소를 바꾸려면 키 교체 또는 제거를 명시해야 한다. 성공 응답은 갱신된 view와 공급자 options이며 오래된 revision은 409다. 공급자 키 원문은 응답에 포함하지 않는다.
