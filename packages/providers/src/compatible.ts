@@ -2,7 +2,9 @@ import { createCatalog } from "./catalog.ts";
 import type { ModelSelection, ProviderId, ProviderOption } from "../../contracts/src/providers.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
-function customEndpoint(base: string | undefined) {
+export const openRouterBaseUrl = "https://openrouter.ai/api/v1/";
+
+export function customEndpoint(base: string | undefined) {
   if (!base?.trim()) return undefined;
   const url = new URL(base);
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
@@ -77,7 +79,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
   ];
   function endpoint(provider: ProviderId) {
     const router = provider === "openrouter";
-    const url = router ? "https://openrouter.ai/api/v1/" : custom;
+    const url = router ? openRouterBaseUrl : custom;
     const key = router ? env.AGS_OPENROUTER_API_KEY : env.AGS_CUSTOM_API_KEY;
     return { url, key };
   }

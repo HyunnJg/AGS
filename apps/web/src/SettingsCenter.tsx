@@ -1,3 +1,4 @@
+import { ProviderConnection } from "./ProviderConnection.tsx";
 import { SectionMemorySetting } from "./SectionMemory.tsx";
 import { DisplayRules } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -199,6 +200,7 @@ export function SettingsCenter({
   token,
   selection,
   options,
+  onOptions,
   close,
   save,
   session,
@@ -209,6 +211,7 @@ export function SettingsCenter({
   token: string;
   selection: ModelSelection;
   options: ProviderOption[];
+  onOptions: (options: ProviderOption[]) => void;
   close: () => void;
   save: (value: ModelSelection) => Promise<void>;
   session?: Session;
@@ -224,6 +227,7 @@ export function SettingsCenter({
   const [model, setModel] = useState(selection.model);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [catalogVersion, refreshCatalog] = useState(0);
   const enabled = options.some((o) => o.id === provider && o.enabled);
   useEffect(() => {
     const el = dialog.current;
@@ -258,7 +262,7 @@ export function SettingsCenter({
         </button>
       </header>
       <div className="settings-layout">
-        <fieldset className="settings-rail" aria-label="설정 분류">
+        <fieldset disabled={saving} className="settings-rail" aria-label="설정 분류">
           {["모델", "임베딩", "이미지", "TTS", "언어 지원", "고급 기능", "플러그인", "토글형 모듈"].map(
             (item) => (
               <button
@@ -276,7 +280,7 @@ export function SettingsCenter({
         </fieldset>
         <section className="settings-detail">
           {section === "모델" ? (
-            <fieldset className="settings-tabs" aria-label="모델 설정 항목">
+            <fieldset disabled={saving} className="settings-tabs" aria-label="모델 설정 항목">
               {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트", "정규식"].map((item) => (
                 <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>
                   {item}
@@ -297,14 +301,9 @@ export function SettingsCenter({
               <small>대화를 시작하면 이 대화의 컨텍스트를 설정할 수 있습니다.</small>
             )
           ) : section === "모델" ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void apply();
-              }}
-            >
+            <>
               {sessionTitle && <small>적용할 대화 · {sessionTitle}</small>}
-              <fieldset className="provider-pills" aria-label="공급자">
+              <fieldset disabled={saving} className="provider-pills" aria-label="공급자">
                 <legend>공급자</legend>
                 {options.map((o) => (
                   <button
@@ -321,31 +320,52 @@ export function SettingsCenter({
                   </button>
                 ))}
               </fieldset>
-              {!enabled ? (
-                <small>
-                  {provider === "openrouter"
-                    ? "서버에 AGS_OPENROUTER_API_KEY를 설정하세요."
-                    : "서버에 AGS_CUSTOM_BASE_URL을 설정하세요."}
-                </small>
-              ) : provider === "mock" ? (
-                <small>API 키 없이 응답을 확인하는 로컬 테스트 모델입니다.</small>
-              ) : (
-                <ModelList key={provider} token={token} provider={provider} model={model} choose={setModel} />
+              {provider !== "mock" && (
+                <ProviderConnection
+                  key={provider}
+                  provider={provider}
+                  token={token}
+                  enabled={enabled}
+                  onBusy={setSaving}
+                  onSave={(choices, next, previous) => {
+                    onOptions(choices);
+                    if (!model || model === previous) setModel(next);
+                    refreshCatalog((n) => n + 1);
+                  }}
+                />
               )}
-              {error && <p role="alert">{error}</p>}
-              {streaming && <small>이 대화의 응답이 끝나면 모델을 변경할 수 있습니다.</small>}
-              <footer>
-                <button
-                  type="submit"
-                  className="primary"
-                  disabled={
-                    saving || streaming || !enabled || !isModelSelection({ provider, model: model.trim() })
-                  }
-                >
-                  {sessionTitle ? "적용" : "이 모델로 대화 시작"}
-                </button>
-              </footer>
-            </form>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void apply();
+                }}
+              >
+                {!enabled ? null : provider === "mock" ? (
+                  <small>API 키 없이 응답을 확인하는 로컬 테스트 모델입니다.</small>
+                ) : (
+                  <ModelList
+                    key={provider + catalogVersion}
+                    token={token}
+                    provider={provider}
+                    model={model}
+                    choose={setModel}
+                  />
+                )}
+                {error && <p role="alert">{error}</p>}
+                {streaming && <small>이 대화의 응답이 끝나면 모델을 변경할 수 있습니다.</small>}
+                <footer>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={
+                      saving || streaming || !enabled || !isModelSelection({ provider, model: model.trim() })
+                    }
+                  >
+                    {sessionTitle ? "적용" : "이 모델로 대화 시작"}
+                  </button>
+                </footer>
+              </form>
+            </>
           ) : section === "토글형 모듈" ? (
             <SectionMemorySetting token={token} />
           ) : (

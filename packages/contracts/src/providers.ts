@@ -28,3 +28,13 @@ export interface CatalogModel {
   name: string;
   contextLength?: number;
 }
+
+export type ConnectionId = Exclude<ProviderId, "mock">;
+export interface ConnectionView {
+  revision: number;
+  baseUrl: string;
+  defaultModel: string;
+  hasKey: boolean;
+  needsKey: boolean;
+  persistentKeys: boolean;
+}

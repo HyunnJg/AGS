@@ -84,6 +84,14 @@ export async function api(
         workspaceMessages[body.error] ?? `작업공간 요청을 완료하지 못했습니다 (HTTP ${res.status}).`,
       );
     }
+    if (path.startsWith("/api/settings/connections/")) {
+      if (res.status === 409) throw new SettingsConflict();
+      const { error } = await res.json();
+      if (error === "new_endpoint_key") throw new Error("주소가 바뀌었습니다. 새 키를 입력하거나 기존 키 제거를 선택하세요.");
+      if (error === "invalid_connection_url") throw new Error("API 기본 주소를 확인하세요. 원격 서버는 HTTPS를 사용하세요.");
+      if (error === "invalid_connection") throw new Error("모델 ID와 API 키에 공백이나 허용되지 않는 문자가 있는지 확인하세요.");
+      throw new Error("연결 설정을 저장하거나 읽지 못했습니다. 서버의 사용자 계정과 저장 권한을 확인하세요.");
+    }
     if (res.status === 422)
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",
