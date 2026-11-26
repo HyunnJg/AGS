@@ -1,3 +1,5 @@
+import { CallCapture } from "../../../packages/providers/src/capture.ts";
+import type { CallKind, CallLog, CallSummary } from "../../../packages/contracts/src/calls.ts";
 import type { Review } from "../../../packages/contracts/src/reviews.ts";
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
@@ -23,6 +25,7 @@ const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name
 
 export class SessionStore {
   private db: DatabaseSync;
+  protectCall?: (capture: CallCapture) => void;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -80,6 +83,12 @@ export class SessionStore {
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
           preset TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS call_log(id TEXT PRIMARY KEY, summary TEXT NOT NULL, detail TEXT NOT NULL);
+        CREATE TRIGGER IF NOT EXISTS trim_call_log AFTER INSERT ON call_log BEGIN
+          DELETE FROM call_log WHERE rowid <= (SELECT rowid FROM call_log ORDER BY rowid DESC LIMIT 1 OFFSET 100);
+        END;
+        CREATE TABLE IF NOT EXISTS call_log_setting(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO call_log_setting VALUES(1,1);
         CREATE TABLE IF NOT EXISTS collaboration_setting(id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
         INSERT OR IGNORE INTO collaboration_setting VALUES(1,0);
         CREATE TABLE IF NOT EXISTS reviews(
@@ -260,6 +269,43 @@ export class SessionStore {
   }
   setKnowledgeEnabled(enabled: boolean) {
     this.db.prepare("UPDATE knowledge_setting SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  logsEnabled() {
+    return this.db.prepare("SELECT enabled FROM call_log_setting WHERE id=1").get()?.enabled === 1;
+  }
+  setLogsEnabled(enabled: boolean) {
+    this.db.prepare("UPDATE call_log_setting SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  startCall(kind: CallKind, selection: ModelSelection, session: string | null) {
+    try {
+      if (!this.logsEnabled()) return;
+    } catch {
+      return;
+    }
+    const capture = new CallCapture(kind, selection, session, (log) => {
+      const { headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
+      this.db
+        .prepare("INSERT INTO call_log VALUES(?,?,?)")
+        .run(
+          log.id,
+          JSON.stringify(summary),
+          JSON.stringify({ headers, body, bodyLimited, answer, answerLimited }),
+        );
+    });
+    this.protectCall?.(capture);
+    return capture;
+  }
+  callList(): CallSummary[] {
+    return this.db
+      .prepare("SELECT summary FROM call_log ORDER BY rowid DESC")
+      .all()
+      .map((row) => JSON.parse(String(row.summary)));
+  }
+  callDetails(id?: string): CallLog[] {
+    const rows = id
+      ? this.db.prepare("SELECT summary,detail FROM call_log WHERE id=?").all(id)
+      : this.db.prepare("SELECT summary,detail FROM call_log ORDER BY rowid DESC").all();
+    return rows.map((row) => ({ ...JSON.parse(String(row.summary)), ...JSON.parse(String(row.detail)) }));
   }
   collaborationEnabled() {
     return this.db.prepare("SELECT enabled FROM collaboration_setting WHERE id=1").get()?.enabled === 1;

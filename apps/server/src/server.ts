@@ -1,3 +1,4 @@
+import { callStatus } from "../../../packages/providers/src/capture.ts";
 import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
@@ -73,6 +74,11 @@ export function createChatServer(
 ) {
   if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) throw new Error("invalid_local_token");
   if (connections) providers = connections.adapters;
+  if (store)
+    store.protectCall = (capture) => {
+      capture.protect(token);
+      providers.protect(capture);
+    };
   const authorization = Buffer.from(`Bearer ${token}`);
   const active = new Map<string, AbortController>();
 
@@ -163,13 +169,35 @@ export function createChatServer(
       providers = connections.adapters;
       return json({ view, options: providers.options });
     }
+    if (path === "/api/settings/call-logs" && store) {
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || !("enabled" in body) || typeof body.enabled !== "boolean")
+          throw new RequestError(400, "invalid_setting");
+        store.setLogsEnabled(body.enabled);
+      } else if (req.method !== "GET") return allow("GET, PUT");
+      return json({ enabled: store.logsEnabled() });
+    }
+    const logRoute = /^\/api\/call-logs(?:\/(export|[a-f0-9-]{36}))?$/.exec(path);
+    if (logRoute && store) {
+      if (req.method !== "GET") return allow("GET");
+      if (!logRoute[1]) return json(store.callList());
+      if (logRoute[1] === "export") return json(store.callDetails());
+      const entry = store.callDetails(logRoute[1])[0];
+      if (!entry) throw new RequestError(404, "unknown_call");
+      return json(entry);
+    }
     const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models(\?refresh=1)?$/.exec(path);
     if (catalog) {
       if (req.method !== "GET") return allow("GET");
       const option = providers.options.find((item) => item.id === catalog[1]);
       if (!option?.enabled) throw new RequestError(400, "provider_unavailable");
       try {
-        return json(await providers.models(option.id, Boolean(catalog[2])));
+        return json(
+          await providers.models(option.id, Boolean(catalog[2]), () =>
+            store?.startCall("catalog", { provider: option.id, model: "" }, null),
+          ),
+        );
       } catch {
         throw new RequestError(502, "catalog_unavailable");
       }
@@ -492,6 +520,7 @@ export function createChatServer(
           }
         }, 150);
     }
+    const capture = store?.startCall("chat", session ?? { provider: "mock", model: "" }, session?.id ?? null);
     try {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -503,11 +532,19 @@ export function createChatServer(
       res.flushHeaders();
       const reply =
         session && session.provider !== "mock" && context
-          ? providers.stream(session, context.messages, signal, () => timer.refresh(), context.outputBudget)
+          ? providers.stream(
+              session,
+              context.messages,
+              signal,
+              () => timer.refresh(),
+              context.outputBudget,
+              capture,
+            )
           : provider(message, signal, session?.preset);
       for await (const text of reply) {
         signal.throwIfAborted();
         timer.refresh();
+        capture?.answer(text);
         saveChunk(text);
         if (!res.write(encodeEvent({ type: "delta", text }))) {
           await once(res, "drain", { signal });
@@ -521,8 +558,10 @@ export function createChatServer(
         storageFailed = true;
         throw error;
       }
+      capture?.finish("completed");
       res.end(encodeEvent({ type: "done" }));
     } catch (error) {
+      capture?.finish(storageFailed ? "failed" : callStatus(signal));
       try {
         flush();
       } catch {
