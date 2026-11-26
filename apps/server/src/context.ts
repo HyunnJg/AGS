@@ -5,6 +5,7 @@ import {
   emptySources,
   blockNames,
   type Block,
+  type BlockUsage,
   type SessionSources,
   type ContextLimits,
   type ContextPreview,
@@ -32,23 +33,36 @@ export function assembleContext(
 ): ContextPreview {
   const system: Message = { role: "system", content: systemText(prompt, preset) };
   const request: Message = { role: "user", content: draft };
-  let estimatedInput = messageCost(system.content) + messageCost(request.content);
+  const systemCost = messageCost(system.content);
+  const requestCost = messageCost(request.content);
+  let estimatedInput = systemCost + requestCost;
+  const blockUsage: BlockUsage[] = [
+    { block: "system", estimatedTokens: systemCost, includedMessages: 1, omittedMessages: 0 },
+  ];
   const windowInput = modelWindow === null ? Infinity : modelWindow - (limits.outputBudget ?? 0);
   const budget = Math.min(limits.inputBudget ?? Infinity, windowInput);
   const content: Record<Block, Message[]> = { memory: [], history: [], retrieval: [], input: [request] };
   const excluded: Block[] = [];
   // Keep the fixed instructions and current request. Admit optional blocks by layout order.
   for (const block of order) {
-    if (block === "input") continue;
+    const usage = { block, estimatedTokens: 0, includedMessages: 0, omittedMessages: 0 };
+    blockUsage.push(usage);
+    if (block === "input") {
+      usage.estimatedTokens = requestCost;
+      usage.includedMessages = 1;
+      continue;
+    }
+    const previousTotal = estimatedInput;
     if (block === "history") {
       let start = history.length;
-      while (start >= 2 && (history.length - start) / 2 < limits.turns) {
+      const firstEligible = history.length - 2 * Math.min(limits.turns, Math.floor(history.length / 2));
+      while (start > firstEligible) {
         const previous = history[start - 2],
           reply = history[start - 1];
         if (!previous || !reply) break;
         const size = messageCost(previous.content) + messageCost(reply.content);
         if (estimatedInput + size > budget) {
-          excluded.push(block);
+          usage.omittedMessages = start - firstEligible;
           break;
         }
         estimatedInput += size;
@@ -76,9 +90,12 @@ ${ref.text}`);
         if (estimatedInput + size <= budget) {
           content[block].push({ role: "user", content: text });
           estimatedInput += size;
-        } else if (!excluded.includes(block)) excluded.push(block);
+        } else usage.omittedMessages++;
       }
     }
+    usage.estimatedTokens = estimatedInput - previousTotal;
+    usage.includedMessages = content[block].length;
+    if (usage.omittedMessages) excluded.push(block);
   }
   const messages = [system, ...order.flatMap((block) => content[block])];
   const blocks: ContextPreview["blocks"] = [
@@ -90,6 +107,8 @@ ${ref.text}`);
     blocks,
     excluded,
     modelWindow,
+    inputCeiling: Number.isFinite(budget) ? Math.max(0, budget) : null,
+    blockUsage,
     includedTurns: content.history.length / 2,
     estimatedInput,
     fits: estimatedInput <= budget,
