@@ -180,3 +180,19 @@ test("Gemini 스트리밍 중 중단하면 이미 받은 텍스트만 남고 재
   await assert.rejects(stream.next(), (error) => error === reason);
   assert.equal(count, 1);
 });
+
+test("Gemini의 400 응답은 구조화된 키 오류만 인증 오류로 분류한다", async () => {
+  for (const [reason, expected] of [
+    ["API_KEY_INVALID", /provider_auth/],
+    ["BAD_REQUEST", /provider_failed/],
+  ] as const) {
+    const adapters = configureProviders(env, async () =>
+      Response.json({ error: { message: "API_KEY_INVALID", details: [{ reason }] } }, { status: 400 }),
+    );
+    await assert.rejects(
+      adapters.stream(target, [{ role: "user", content: "질문" }], new AbortController().signal).next(),
+      expected,
+    );
+    await assert.rejects(adapters.models("gemini"), expected);
+  }
+});

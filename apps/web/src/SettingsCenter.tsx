@@ -32,6 +32,7 @@ function ModelList({
   const [favorites, setFavorites] = useState<ModelSelection[]>([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"loading" | "failed" | "ready">("loading");
+  const [catalogError, setCatalogError] = useState("");
   const [attempt, retry] = useState(0);
   const [pinning, setPinning] = useState(true);
   const [pinError, setPinError] = useState("");
@@ -46,8 +47,8 @@ function ModelList({
           setStatus("ready");
         }
       })
-      .catch(() => {
-        if (current) setStatus("failed");
+      .catch(error => {
+        if (current) { setCatalogError(error instanceof Error ? error.message : "모델 목록을 읽지 못했습니다."); setStatus("failed"); }
       });
     return () => {
       current = false;
@@ -94,6 +95,7 @@ function ModelList({
   }
   return (
     <div className="catalog">
+      {provider === "anthropic" && <small>Claude API의 워크스페이스 전용 키를 사용하세요. 최대 출력을 비워 두면 채팅당 4,096토큰을 요청합니다.</small>}
       {provider === "gemini" && <small>Gemini Developer API의 콘텐츠 생성 모델입니다. 텍스트 응답을 지원하는 모델을 선택하세요.</small>}
       {provider === "openai" && <small>계정에서 사용할 수 있는 모델 목록입니다. 텍스트 채팅에는 Chat Completions 지원 모델을 선택하세요.</small>}
       <label>
@@ -113,7 +115,7 @@ function ModelList({
       {status === "loading" && <output>목록을 불러오는 중…</output>}
       {status === "failed" && (
         <div className="catalog-error">
-          목록을 가져오지 못했습니다. 모델 ID를 직접 입력할 수 있습니다.{" "}
+          {catalogError}{" "}
           <button type="button" onClick={() => retry((n) => n + 1)}>
             다시 조회
           </button>

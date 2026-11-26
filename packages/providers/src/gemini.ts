@@ -45,3 +45,12 @@ export async function* geminiReply(events: AsyncIterable<string>) {
   }
   if (!finished || !hasText) throw new Error("incomplete_gemini_reply");
 }
+
+export function invalidGeminiKey(body: string) {
+  try {
+    const details = JSON.parse(body).error?.details;
+    return Array.isArray(details) && details.some((item) => item?.reason === "API_KEY_INVALID");
+  } catch {
+    return false;
+  }
+}

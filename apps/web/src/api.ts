@@ -98,6 +98,10 @@ export async function api(
         workspaceMessages[body.error] ?? `작업공간 요청을 완료하지 못했습니다 (HTTP ${res.status}).`,
       );
     }
+    if (path.startsWith("/api/providers/")) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error === "provider_auth" ? workspaceMessages.provider_auth : "목록을 가져오지 못했습니다. 모델 ID를 직접 입력할 수 있습니다.");
+    }
     if (path.startsWith("/api/settings/connections/")) {
       if (res.status === 409) throw new SettingsConflict();
       const { error } = await res.json().catch(() => ({}));

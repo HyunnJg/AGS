@@ -2,6 +2,7 @@ export const providerNames = {
   mock: "로컬 mock",
   openrouter: "OpenRouter",
   openai: "OpenAI",
+  anthropic: "Anthropic (Claude)",
   gemini: "Google Gemini",
   custom: "사용자 지정 API",
 } as const;
@@ -33,7 +34,7 @@ export interface CatalogModel {
 
 export type ConnectionId = Exclude<ProviderId, "mock">;
 export function isConnectionId(id: unknown): id is ConnectionId {
-  return id === "gemini" || id === "openai" || id === "openrouter" || id === "custom";
+  return id === "anthropic" || id === "gemini" || id === "openai" || id === "openrouter" || id === "custom";
 }
 export interface ConnectionView {
   revision: number;

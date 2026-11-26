@@ -109,29 +109,38 @@ export class CallCapture {
       /* A diagnostic write must not change the provider result. */
     }
   }
-  // Providers may return a JSON/text error instead of SSE. Bound diagnostic reads by size and time.
-  async errorBody(body: ReadableStream<Uint8Array> | null) {
-    if (!body) return;
-    const reader = body.getReader();
-    const timer = setTimeout(() => {
-      this.clipped = true;
-      void reader.cancel().catch(() => {});
-    }, 750);
-    try {
-      while (this.size < limit) {
-        const { value, done } = await reader.read();
-        if (done) return;
-        this.bytes(value);
-      }
-      this.clipped = true;
-    } catch {
-      this.clipped = true;
-    } finally {
-      clearTimeout(timer);
-      void reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
+  markBodyLimited() {
+    this.clipped = true;
   }
+}
+
+export async function readErrorBody(body: ReadableStream<Uint8Array> | null, capture?: CallCapture) {
+  if (!body) return "";
+  const reader = body.getReader();
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  const timer = setTimeout(() => {
+    capture?.markBodyLimited();
+    void reader.cancel().catch(() => {});
+  }, 750);
+  try {
+    while (size < limit) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const part = value.subarray(0, limit - size);
+      chunks.push(part);
+      capture?.bytes(value);
+      size += part.length;
+    }
+    if (size === limit) capture?.markBodyLimited();
+  } catch {
+    capture?.markBodyLimited();
+  } finally {
+    clearTimeout(timer);
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, size).toString("utf8");
 }
 
 export function callStatus(signal: AbortSignal): CallStatus {
