@@ -19,6 +19,29 @@ test(
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
     const fake = createServer(async (req, res) => {
+      if (req.url?.startsWith("/openai/")) {
+        assert.equal(req.headers.authorization, "Bearer openai-ui-fixture");
+        if (req.url === "/openai/v1/models") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ object: "list", data: [{ id: "ui/openai-text", object: "model" }] }));
+          return;
+        }
+        assert.equal(req.url, "/openai/v1/chat/completions");
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const payload = JSON.parse(Buffer.concat(chunks).toString());
+        assert.equal(payload.model, "ui/openai-text");
+        assert.equal(payload.stream, true);
+        assert.deepEqual(payload.stream_options, {include_usage: true});
+        assert.ok(!("max_tokens" in payload));
+        if (payload.messages[0].content.startsWith("독립 검토자")) {
+          assert.equal(payload.max_completion_tokens, 1200);
+          assert.deepEqual(payload.messages.slice(1), [{ role: "user", content: "직접 연결 검토 확인" }]);
+        }
+        res.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "openai-local-1" });
+        res.end('data: {"choices":[{"delta":{"content":"직접 연결 응답"}}]}\n\ndata: {"choices":[],"usage":{"total_tokens":24}}\n\ndata: [DONE]\n\n');
+        return;
+      }
       assert.equal(req.headers.authorization, "Bearer fixture-only");
       if (req.url === "/v1/models") {
         res.writeHead(200, { "content-type": "application/json" }).end(
@@ -75,7 +98,8 @@ test(
     let child;
     let closed;
     async function start(port) {
-      child = spawn(process.execPath, ["dist/apps/server/src/main.js"], {
+      const transport = new URL("./fixtures/provider-transport.mjs", import.meta.url).href;
+      child = spawn(process.execPath, ["--import", transport, "dist/apps/server/src/main.js"], {
         env: {
           ...process.env,
           AGS_STATE_DIR: dir,
@@ -83,6 +107,9 @@ test(
           AGS_LOCAL_TOKEN: token,
           AGS_OPENROUTER_API_KEY: "",
           AGS_OPENROUTER_MODEL: "",
+          AGS_TEST_PROVIDER_PORT: String(fake.address().port),
+          AGS_OPENAI_API_KEY: "",
+          AGS_OPENAI_MODEL: "",
           AGS_CUSTOM_MODEL: "",
           AGS_CUSTOM_API_KEY: "",
           AGS_CUSTOM_BASE_URL: "",
@@ -745,6 +772,41 @@ test(
     assert.equal(await detail.count(), 0);
     assert.ok(await page.getByLabel("새 호출 기록").isChecked());
     assert.deepEqual(await (await page.request.get(`${base}/api/call-logs/export`, { headers })).json(), []);
+    await page.getByRole("button", { name: "모델", exact: true }).click();
+    await page.getByRole("button", { name: "OpenAI", exact: true }).click();
+    await page.getByLabel("API 키", { exact: true }).fill("openai-ui-fixture");
+    assert.equal(await page.getByLabel("API 기본 주소").count(), 0);
+    await page.getByLabel("기본 모델 ID").fill("ui/openai-text");
+    await page.getByRole("button", { name: "연결 저장" }).click();
+    const modelRow = page.getByRole("button", { name: "ui/openai-text", exact: true });
+    await modelRow.click();
+    assert.equal(await page.getByLabel("API 키", { exact: true }).inputValue(), "");
+    await page.getByRole("button", { name: "ui/openai-text 즐겨찾기" }).click();
+    await page.locator('.pin[aria-pressed="true"]').waitFor();
+    await page.getByRole("button", { name: "적용", exact: true }).click();
+    await page.getByRole("dialog").waitFor({state: "hidden"});
+    assert.equal(await quick.inputValue(), JSON.stringify(["openai", "ui/openai-text"]));
+    await page.getByLabel("메시지", { exact: true }).fill("직접 연결 테스트");
+    await page.getByRole("button", {name:"전송"}).click();
+    await page.getByText("직접 연결 응답", { exact: true }).waitFor();
+    await switchModel("mock", "");
+    await editor.locator("summary").first().click();
+    await editor.getByRole("combobox").selectOption(JSON.stringify(["openai", "ui/openai-text"]));
+    await editor.getByLabel("검토 모델에 보낼 내용").fill("직접 연결 검토 확인");
+    await editor.getByRole("button", { name: "승인하고 검토 요청" }).click();
+    const directReply = editor.getByLabel("반영할 검토 내용");
+    await directReply.waitFor();
+    assert.equal(await directReply.inputValue(), "직접 연결 응답");
+    const directLogs = await (await page.request.get(`${base}/api/call-logs/export`, { headers })).json();
+    for (const kind of ["chat", "review", "catalog"]) {
+      assert.ok(directLogs.some(row => row.provider === "openai" && row.kind === kind && row.status === "completed"));
+    }
+    const reviewLog = directLogs.find(row => row.kind === "review" && row.provider === "openai");
+    assert.equal(reviewLog.request.maxTokens, 1200);
+    assert.equal(reviewLog.headers["x-request-id"], "openai-local-1");
+    assert.ok(reviewLog.body.includes("[DONE]"));
+    assert.ok(reviewLog.body.includes('"total_tokens":24'));
+    assert.ok(!JSON.stringify(directLogs).includes("openai-ui-fixture"));
     assert.deepEqual(pageErrors, []);
   },
 );

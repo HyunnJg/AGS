@@ -7,9 +7,9 @@ import {
   type ConnectionId,
   type ConnectionView,
 } from "../../../packages/contracts/src/providers.ts";
-import { configureProviders, customEndpoint, openRouterBaseUrl } from "../../../packages/providers/src/compatible.ts";
+import { configureProviders, customEndpoint, officialBaseUrls } from "../../../packages/providers/src/compatible.ts";
 
-const ids = ["custom", "openrouter"] as const;
+const ids = ["custom", "openrouter", "openai"] as const;
 const windows = process.platform === "win32";
 
 interface RecordData {
@@ -79,21 +79,21 @@ export class Connections {
   private defaults(id: ConnectionId): RecordData {
     return {
       revision: 0,
-      baseUrl: id === "openrouter" ? openRouterBaseUrl : (customEndpoint(this.env.AGS_CUSTOM_BASE_URL) ?? ""),
-      defaultModel: this.env[id === "openrouter" ? "AGS_OPENROUTER_MODEL" : "AGS_CUSTOM_MODEL"]?.trim() ?? "",
+      baseUrl: id === "custom" ? (customEndpoint(this.env.AGS_CUSTOM_BASE_URL) ?? "") : officialBaseUrls[id],
+      defaultModel: this.env[`AGS_${id.toUpperCase()}_MODEL`]?.trim() ?? "",
       source: "environment",
     };
   }
   private key(id: ConnectionId, record: RecordData) {
     if (record.source === "supplied") return this.keys.get(id);
     if (record.source === "environment" && record.baseUrl === this.defaults(id).baseUrl)
-      return this.env[id === "openrouter" ? "AGS_OPENROUTER_API_KEY" : "AGS_CUSTOM_API_KEY"];
+      return this.env[`AGS_${id.toUpperCase()}_API_KEY`];
   }
   private configure() {
     const env: NodeJS.ProcessEnv = {};
     for (const id of ids) {
       const record = this.records.get(id) ?? this.defaults(id);
-      const prefix = id === "openrouter" ? "AGS_OPENROUTER" : "AGS_CUSTOM";
+      const prefix = `AGS_${id.toUpperCase()}`;
       const key = this.key(id, record);
       env[`${prefix}_MODEL`] = record.defaultModel;
       env[`${prefix}_API_KEY`] = key;
@@ -135,7 +135,7 @@ export class Connections {
       (typeof input !== "string" || !/^[!-~]{1,4096}$/.test(input))
     )
       throw new ConnectionError(400, "invalid_connection");
-    let baseUrl = openRouterBaseUrl;
+    let baseUrl = id === "custom" ? "" : officialBaseUrls[id];
     if (id === "custom") {
       try {
         baseUrl = customEndpoint(body.baseUrl) ?? "";

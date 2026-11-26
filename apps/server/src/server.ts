@@ -15,7 +15,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
 import { type Session, isPreset, type Preset } from "../../../packages/contracts/src/sessions.ts";
-import { isModelSelection } from "../../../packages/contracts/src/providers.ts";
+import { isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
 import type { SessionStore } from "./sessions.ts";
@@ -160,9 +160,9 @@ export function createChatServer(
       if (req.method !== "GET") return allow("GET");
       return json(providers.options);
     }
-    const connection = /^\/api\/settings\/connections\/(openrouter|custom)$/.exec(path);
-    if (connection && connections) {
-      const id = connection[1] === "openrouter" ? "openrouter" : "custom";
+    const connection = /^\/api\/settings\/connections\/([^/]+)$/.exec(path);
+    if (connections && isConnectionId(connection?.[1])) {
+      const id = connection[1];
       if (req.method === "GET") return json(connections.view(id));
       if (req.method !== "PUT") return allow("GET, PUT");
       const view = connections.save(id, await readBody(req));
@@ -188,8 +188,8 @@ export function createChatServer(
       if (!entry) throw new RequestError(404, "unknown_call");
       return json(entry);
     }
-    const catalog = /^\/api\/providers\/(mock|openrouter|custom)\/models(\?refresh=1)?$/.exec(path);
-    if (catalog) {
+    const catalog = /^\/api\/providers\/([^/]+)\/models(\?refresh=1)?$/.exec(path);
+    if (catalog && (catalog[1] === "mock" || isConnectionId(catalog[1]))) {
       if (req.method !== "GET") return allow("GET");
       const option = providers.options.find((item) => item.id === catalog[1]);
       if (!option?.enabled) throw new RequestError(400, "provider_unavailable");
@@ -317,9 +317,12 @@ export function createChatServer(
           if (!sectionId || Object.keys(selection as object).length !== 1)
             throw new RequestError(400, "invalid_model");
         }
-        const router = providers.options.find((o) => o.id === "openrouter" && o.enabled);
-        const selection = { provider: "openrouter", model: router?.defaultModel };
-        return json(store.create(isModelSelection(selection) ? selection : undefined, sectionId), 201);
+        const preferred = providers.options.find(o =>
+          (o.id === "openrouter" || o.id === "openai") && o.enabled &&
+          isModelSelection({ provider: o.id, model: o.defaultModel }),
+        );
+        const selection = preferred && { provider: preferred.id, model: preferred.defaultModel };
+        return json(store.create(selection, sectionId), 201);
       }
       return allow("GET, POST");
     }

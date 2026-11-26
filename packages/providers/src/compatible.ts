@@ -3,7 +3,10 @@ import { createCatalog } from "./catalog.ts";
 import type { ModelSelection, ProviderId, ProviderOption } from "../../contracts/src/providers.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
-export const openRouterBaseUrl = "https://openrouter.ai/api/v1/";
+export const officialBaseUrls = {
+  openai: "https://api.openai.com/v1/",
+  openrouter: "https://openrouter.ai/api/v1/",
+} as const;
 
 export function customEndpoint(base: string | undefined) {
   if (!base?.trim()) return undefined;
@@ -59,6 +62,8 @@ async function* readReply(body: ReadableStream<Uint8Array>, onActivity?: () => v
         if (chunk.error || choice?.finish_reason === "error") throw new ProviderError("provider_failed");
         const content = choice?.delta?.content;
         if (typeof content === "string" && content) yield content;
+        const refusal = choice?.delta?.refusal;
+        if (typeof refusal === "string" && refusal) yield refusal;
       }
       if (pending.length > 2 * 1024 * 1024) throw new ProviderError("provider_failed");
     }
@@ -77,13 +82,18 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       enabled: Boolean(env.AGS_OPENROUTER_API_KEY),
       defaultModel: env.AGS_OPENROUTER_MODEL?.trim() || "",
     },
+    {
+      id: "openai",
+      enabled: Boolean(env.AGS_OPENAI_API_KEY),
+      defaultModel: env.AGS_OPENAI_MODEL?.trim() || "",
+    },
     { id: "custom", enabled: Boolean(custom), defaultModel: env.AGS_CUSTOM_MODEL?.trim() || "" },
   ];
   function endpoint(provider: ProviderId) {
-    const router = provider === "openrouter";
-    const url = router ? openRouterBaseUrl : custom;
-    const key = router ? env.AGS_OPENROUTER_API_KEY : env.AGS_CUSTOM_API_KEY;
-    return { url, key };
+    if (provider === "custom") return { url: custom, key: env.AGS_CUSTOM_API_KEY };
+    if (provider === "mock") return { url: undefined, key: undefined };
+    const key = env[`AGS_${provider.toUpperCase()}_API_KEY`];
+    return { url: key ? officialBaseUrls[provider] : undefined, key };
   }
   async function* stream(
     selection: ModelSelection,
@@ -95,8 +105,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
   ) {
     const { url, key } = endpoint(selection.provider);
     protect(capture);
-    if (!url || (selection.provider === "openrouter" && !key) || selection.provider === "mock")
-      throw new ProviderError("provider_failed");
+    if (!url) throw new ProviderError("provider_failed");
     try {
       capture?.recordRequest(messages, outputBudget);
       const response = await send(new URL("chat/completions", url).href, {
@@ -111,8 +120,11 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         body: JSON.stringify({
           model: selection.model,
           stream: true,
+          ...(selection.provider === "openai" && { stream_options: { include_usage: true } }),
           messages,
-          ...(outputBudget != null && { max_tokens: outputBudget }),
+          ...(outputBudget != null && {
+            [selection.provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
+          }),
         }),
       });
       capture?.response(response);
@@ -134,7 +146,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     }
   }
   function protect(capture?: CallCapture) {
-    capture?.protect(env.AGS_CUSTOM_API_KEY, env.AGS_OPENROUTER_API_KEY);
+    capture?.protect(env.AGS_CUSTOM_API_KEY, env.AGS_OPENROUTER_API_KEY, env.AGS_OPENAI_API_KEY);
   }
   return { options, stream, protect, ...createCatalog(send, endpoint) };
 }
