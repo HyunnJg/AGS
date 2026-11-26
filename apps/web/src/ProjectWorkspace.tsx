@@ -215,7 +215,7 @@ function FileBrowser({
           }}
         />
       )}
-      {saved === view.path && saved && <output>저장했습니다.</output>}
+      {saved === view.path && saved && <output>저장했습니다 · {saved}</output>}
       {!result && <output>불러오는 중…</output>}
       {result?.error && (
         <>

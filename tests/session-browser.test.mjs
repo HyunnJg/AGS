@@ -596,7 +596,7 @@ test(
     await panel.locator(".added").filter({ hasText: "토요일" }).waitFor();
     assert.equal(await readFile(join(example, "notes", "intro.md"), "utf8"), before);
     await panel.getByRole("button", { name: "승인하고 저장" }).click();
-    await panel.getByText("저장했습니다.", { exact: true }).waitFor();
+    await panel.getByText("저장했습니다 · notes/intro.md", { exact: true }).waitFor();
     assert.match(await readFile(join(example, "notes", "intro.md"), "utf8"), /토요일/);
     await panel.getByRole("button", { name: "상위 폴더" }).click();
     await panel.getByRole("button", { name: "새 파일", exact: true }).click();
@@ -616,7 +616,7 @@ test(
       code: "ENOENT",
     });
     await panel.getByRole("button", { name: "승인하고 저장" }).click();
-    await panel.getByText("저장했습니다.", { exact: true }).waitFor();
+    await panel.getByText("저장했습니다 · notes/result.md", { exact: true }).waitFor();
     assert.equal(await readFile(join(example, "notes", "result.md"), "utf8"), "승인할 결과");
     await panel.getByRole("button", { name: "파일 수정", exact: true }).click();
     await panel.getByLabel("수정안", { exact: true }).fill("AGS에서 작성한 초안");
@@ -650,7 +650,7 @@ test(
     await panel.getByRole("button", { name: "변경 비교" }).click();
     await panel.getByText("notes/result-검토.md · 변경 미리보기").waitFor();
     await panel.getByRole("button", { name: "승인하고 저장" }).click();
-    await panel.getByText("저장했습니다.", { exact: true }).waitFor();
+    await panel.getByText("저장했습니다 · notes/result-검토.md", { exact: true }).waitFor();
     assert.equal(await readFile(join(example, "notes", "result-검토.md"), "utf8"), "AGS에서 작성한 초안");
     assert.equal(await readFile(occupied, "utf8"), "다른 편집기가 먼저 저장");
     assert.equal(await readFile(join(example, "notes", "result.md"), "utf8"), "외부 변경");
