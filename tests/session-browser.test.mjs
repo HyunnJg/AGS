@@ -205,8 +205,10 @@ test(
     await page.getByText(dir, { exact: true }).waitFor();
     await page.getByRole("button", {name: "모델", exact: true}).click();
     await page.getByRole("button", {name: "분야 프리셋"}).click();
+    const registeredPresets = page.getByRole("region", {name: "등록된 프리셋"});
+    await registeredPresets.getByText("등록된 프리셋이 없습니다.").waitFor();
     await page.getByLabel("Markdown 파일 가져오기").setInputFiles({
-      name: "History EN.md", mimeType: "text/markdown", buffer: Buffer.from("# History\nDistinguish evidence from inference."),
+      name: "History EN.md", mimeType: "text/markdown", buffer: Buffer.from("# History\r\nDistinguish evidence from inference."),
     });
     const profileText = page.getByLabel("분야 지침");
     await page.waitForFunction(() => document.querySelector("dialog textarea")?.value.startsWith("# History"));
@@ -214,6 +216,22 @@ test(
     await profileText.fill("# History\nCheck the primary source.");
     await page.getByRole("button", {name: "프리셋 등록"}).click();
     await page.getByText(/‘History EN’ 등록 완료/).waitFor();
+    const savedProfile = registeredPresets.getByText("History EN", {exact: true});
+    await profileText.fill("작성 중인 새 지침");
+    await savedProfile.click();
+    const instructions = "# History\nCheck the primary source.";
+    await registeredPresets.locator("pre").waitFor();
+    assert.equal(await registeredPresets.locator("pre").textContent(), instructions);
+    assert.equal(await profileText.inputValue(), "작성 중인 새 지침");
+    await page.getByLabel("Markdown 파일 가져오기").setInputFiles({
+      name: "History EN.md", mimeType: "text/markdown", buffer: Buffer.from(instructions.replaceAll("\n", "\r\n")),
+    });
+    const registration = page.waitForResponse(r => r.url().endsWith("/api/settings/presets") && r.request().method() === "POST");
+    await page.getByRole("button", {name: "프리셋 등록"}).click();
+    const response = await registration;
+    assert.equal(response.status(), 200);
+    assert.equal(response.request().postDataJSON().instructions, instructions);
+    assert.equal(await registeredPresets.locator("summary").count(), 1);
     await page.getByRole("button", { name: "언어 지원" }).click();
     const language = page.getByLabel("기본 응답 언어");
     await language.selectOption("ko");

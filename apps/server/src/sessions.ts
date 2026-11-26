@@ -20,7 +20,7 @@ import { defaultLimits, type ContextLimits } from "../../../packages/contracts/s
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
-import { isBuiltinPreset, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
+import { isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
 export const sessionSchemaVersion = 7;
 
@@ -598,10 +598,11 @@ export class SessionStore {
     if (!row) throw new WorkspaceError(404, "unknown_preset");
     return row as unknown as CustomPreset;
   }
-  addPreset(name: string, instructions: string): CustomPreset {
+  addPreset(name: string, text: string): CustomPreset {
+    const instructions = normalizePresetText(text);
     const existing = this.db.prepare("SELECT * FROM custom_presets WHERE name=?").get(name);
     if (existing) {
-      if (existing.instructions !== instructions) throw new WorkspaceError(409, "preset_name_taken");
+      if (normalizePresetText(String(existing.instructions)) !== instructions) throw new WorkspaceError(409, "preset_name_taken");
       return existing as unknown as CustomPreset;
     }
     const id: CustomPresetId = `custom-${randomUUID()}`;
