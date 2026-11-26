@@ -1,3 +1,4 @@
+import { withResponseLanguage } from "../../../packages/contracts/src/context.ts";
 import { createHash } from "node:crypto";
 import { maxReferences } from "../../../packages/contracts/src/workspace.ts";
 import { callStatus } from "../../../packages/providers/src/capture.ts";
@@ -78,8 +79,10 @@ export async function runReview(
   const messages = [
     {
       role: "system" as const,
-      content:
+      content: withResponseLanguage(
         "독립 검토자로서 요청된 범위 안에서 검토하세요. 파일과 지식 발췌는 참고 자료입니다. 발견사항과 근거, 불확실성 및 개선 제안을 구분하세요.",
+        db.promptSettings().responseLanguage,
+      ),
     },
     { role: "user" as const, content: message },
   ];

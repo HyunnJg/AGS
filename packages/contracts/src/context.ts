@@ -32,13 +32,29 @@ export const presetsText: Record<Preset, string> = {
   research: "근거와 추론을 구분하고 출처의 한계를 명시하세요.",
   writing: "사용자가 지정한 독자와 목적, 문체를 고려해 작성하세요.",
 };
-export function systemText(prompt: string, preset: Preset) {
+export const responseLanguages = {
+  auto: "자동",
+  ko: "한국어",
+  en: "영어",
+  ja: "일본어",
+  "zh-Hans": "중국어 간체",
+  "zh-Hant": "중국어 번체",
+} as const;
+export type ResponseLanguage = keyof typeof responseLanguages;
+export function isResponseLanguage(value: unknown): value is ResponseLanguage {
+  return typeof value === "string" && Object.hasOwn(responseLanguages, value);
+}
+export function withResponseLanguage(text: string, language: ResponseLanguage) {
+  if (language === "auto") return text;
+  return `${text}\n\n사용자가 다른 언어를 지정하지 않으면 ${responseLanguages[language]}로 답하세요.`;
+}
+export function systemText(prompt: string, preset: Preset, language: ResponseLanguage = "auto") {
   const parts = [systemPolicy];
   if (prompt.trim())
     parts.push(`공용 지침
 ${prompt}`);
   parts.push(`분야 프리셋: ${presetsText[preset]}`);
-  return parts.join("\n\n");
+  return withResponseLanguage(parts.join("\n\n"), language);
 }
 export interface Message {
   role: "system" | "user" | "assistant";
@@ -104,6 +120,7 @@ export function isBlockOrder(value: unknown): value is Block[] {
   );
 }
 export interface PromptSettings {
+  responseLanguage: ResponseLanguage;
   prompt: string;
   order: Block[];
 }

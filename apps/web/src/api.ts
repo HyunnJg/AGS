@@ -116,7 +116,7 @@ export async function api(
       );
     if (
       res.status === 409 &&
-      (path === "/api/settings/prompt" || path.endsWith("/sources") || path === "/api/settings/display-rules")
+      (path === "/api/settings/prompt" || path === "/api/settings/response-language" || path.endsWith("/sources") || path === "/api/settings/display-rules")
     )
       throw new SettingsConflict();
     if (res.status === 409) throw new Error("이 대화에서 응답이 진행 중입니다.");
