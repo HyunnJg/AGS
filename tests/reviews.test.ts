@@ -76,7 +76,7 @@ test("독립 검토는 승인한 내용만 한 번 보내며 실패·취소·재
   db.close();
   // A v4 database already contained standalone reviews, without a selection key.
   const old = new DatabaseSync(path);
-  old.exec("ALTER TABLE reviews DROP COLUMN selectionKey; PRAGMA user_version=4");
+  old.exec("ALTER TABLE shared_prompt DROP COLUMN responseLanguage; ALTER TABLE reviews DROP COLUMN selectionKey; PRAGMA user_version=4");
   old.close();
   db = new SessionStore(path);
   assert.ok(db.reviewHistory(source.id).some(item => item.id === body.id));

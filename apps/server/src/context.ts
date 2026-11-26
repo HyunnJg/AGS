@@ -1,6 +1,7 @@
 import type { FileReference } from "../../../packages/contracts/src/workspace.ts";
 import {
   systemText,
+  type ResponseLanguage,
   defaultOrder,
   emptySources,
   blockNames,
@@ -30,8 +31,9 @@ export function assembleContext(
   references: FileReference[] = [],
   sectionState = "",
   summaries: string[] = [],
+  language: ResponseLanguage = "auto",
 ): ContextPreview {
-  const system: Message = { role: "system", content: systemText(prompt, preset) };
+  const system: Message = { role: "system", content: systemText(prompt, preset, language) };
   const request: Message = { role: "user", content: draft };
   const systemCost = messageCost(system.content);
   const requestCost = messageCost(request.content);

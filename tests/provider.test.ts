@@ -182,6 +182,11 @@ test(
     const knowledge = store.addReference(a.id, projectId, "guide.md", "b".repeat(64), 1, 1, "방법론", "knowledge");
     assert.ok(knowledge);
     assert.equal((await call("/api/settings/knowledge", "PUT", { enabled: false })).status, 200);
+    const langPath = "/api/settings/response-language";
+    assert.deepEqual(await (await call(langPath, "GET")).json(), {language: "auto"});
+    assert.equal((await call(langPath, "PUT", {language: "other", previous: "auto"})).status, 400);
+    assert.equal((await call(langPath, "PUT", {language: "ja", previous: "auto"})).status, 200);
+    assert.equal((await call(langPath, "PUT", {language: "ko", previous: "auto"})).status, 409);
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
@@ -198,6 +203,7 @@ test(
       ],
     );
     assert.match(preview.messages[0].content, /한글로 작성/);
+    assert.match(preview.messages[0].content, /일본어로 답하세요/);
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);
@@ -308,6 +314,9 @@ test(
     assert.equal(timedOut?.status, "timeout");
     assert.equal(cancelled?.status, "cancelled");
     assert.equal(cancelled?.answer, "한글");
+    assert.equal((await call(langPath, "PUT", {language: "auto", previous: "ja"})).status, 200);
+    const automatic = await (await call(`${path}/context-preview`, "POST", {message: "자동", limits})).json();
+    assert.doesNotMatch(automatic.messages[0].content, /사용자가 다른 언어/);
     const logsPath = "/api/call-logs";
     const count = store.callList().length;
     const turns = store.turns(a.id);

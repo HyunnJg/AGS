@@ -82,7 +82,7 @@ test("공용 지침과 대화별 예산은 재시작 뒤에도 복원된다", ()
     assert.ok(!store.setSources(a.id, { memory: "낡은 값", retrieval: "", revision: 0 }));
     store.close();
     store = new SessionStore(file);
-    assert.deepEqual(store.promptSettings(), { prompt: "줄1\n줄2", order });
+    assert.deepEqual(store.promptSettings(), { responseLanguage: "auto", prompt: "줄1\n줄2", order });
     assert.equal(store.sources(a.id).memory, "A의 메모");
     assert.equal(store.sources(b.id).memory, "");
     assert.deepEqual({ ...store.limits(a.id) }, limits);

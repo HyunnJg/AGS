@@ -81,6 +81,7 @@ test(
         assert.deepEqual(payload.stream_options, {include_usage: true});
         assert.ok(!("max_tokens" in payload));
         if (payload.messages[0].content.startsWith("독립 검토자")) {
+          assert.match(payload.messages[0].content, /영어로 답하세요/);
           assert.equal(payload.max_completion_tokens, 1200);
           assert.deepEqual(payload.messages.slice(1), [{ role: "user", content: "직접 연결 검토 확인" }]);
         }
@@ -120,6 +121,7 @@ test(
       assert.equal(payload.model, "ui/test-model");
       assert.equal(payload.max_tokens, 123);
       assert.equal(payload.messages.length, 4);
+      assert.match(payload.messages[0].content, /영어로 답하세요/);
       assert.match(payload.messages[0].content, /테스트 공용 지침\n- 실제 줄바꿈/);
       assert.deepEqual(
         payload.messages.slice(1).map((m) => m.content),
@@ -200,6 +202,11 @@ test(
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await page.getByRole("button", { name: "고급 기능" }).click();
     await page.getByText(dir, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "언어 지원" }).click();
+    const language = page.getByLabel("기본 응답 언어");
+    await language.selectOption("en");
+    await page.getByRole("button", {name: "저장", exact: true}).click();
+    await page.getByText("기본 응답 언어를 저장했습니다.").waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "첫 대화 시작" }).click();
     await page.getByLabel("프리셋").selectOption("coding");
@@ -229,6 +236,8 @@ test(
     await page.getByLabel("메시지").fill("오래 걸리는 요청");
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await page.getByRole("button", { name: "공용 프롬프트" }).click();
+    await page.getByText("고정 지침 미리보기", {exact: true}).click();
+    await page.locator(".context-preview pre").filter({hasText: "영어로 답하세요."}).waitFor();
     await page.getByLabel("모든 대화의 공용 지침").fill("테스트 공용 지침\n- 실제 줄바꿈");
     await page.getByRole("button", { name: "현재 입력 위로" }).click();
     const otherEdit = await page.request.put(`${base}/api/settings/prompt`, {

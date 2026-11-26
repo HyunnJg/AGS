@@ -1,3 +1,4 @@
+import { LanguageSetting } from "./LanguageSetting.tsx";
 import { CallLogs } from "./CallLogs.tsx";
 import { ProviderConnection } from "./ProviderConnection.tsx";
 import { SectionMemorySetting } from "./SectionMemory.tsx";
@@ -274,8 +275,8 @@ export function SettingsCenter({
               <button
                 type="button"
                 key={item}
-                disabled={!["모델", "고급 기능", "토글형 모듈", "호출 로그"].includes(item)}
-                title={["모델", "고급 기능", "토글형 모듈", "호출 로그"].includes(item) ? undefined : "연결 예정"}
+                disabled={!["모델", "언어 지원", "고급 기능", "토글형 모듈", "호출 로그"].includes(item)}
+                title={["모델", "언어 지원", "고급 기능", "토글형 모듈", "호출 로그"].includes(item) ? undefined : "연결 예정"}
                 aria-pressed={section === item}
                 onClick={() => setSection(item)}
               >
@@ -377,6 +378,8 @@ export function SettingsCenter({
                 </footer>
               </form>
             </>
+          ) : section === "언어 지원" ? (
+            <LanguageSetting token={token} />
           ) : section === "호출 로그" ? (
             <CallLogs token={token} />
           ) : section === "토글형 모듈" ? (

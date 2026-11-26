@@ -13,6 +13,8 @@ import {
   type ContextBudget,
   type SessionSources,
   type PromptSettings,
+  type ResponseLanguage,
+  isResponseLanguage,
 } from "../../../packages/contracts/src/context.ts";
 import { defaultLimits, type ContextLimits } from "../../../packages/contracts/src/context.ts";
 import { randomUUID } from "node:crypto";
@@ -20,7 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
 import type { Preset, Session, Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 5;
+export const sessionSchemaVersion = 6;
 
 const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
@@ -133,6 +135,9 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 4) {
         this.db.exec("ALTER TABLE reviews ADD COLUMN selectionKey TEXT; PRAGMA user_version=5");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 5) {
+        this.db.exec("ALTER TABLE shared_prompt ADD COLUMN responseLanguage TEXT NOT NULL DEFAULT 'auto'; PRAGMA user_version=6");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -510,14 +515,19 @@ export class SessionStore {
   }
   promptSettings(): PromptSettings {
     const row = this.db
-      .prepare("SELECT prompt,block_order FROM shared_prompt LEFT JOIN prompt_layout USING(id) WHERE id=1")
+      .prepare("SELECT prompt,responseLanguage,block_order FROM shared_prompt LEFT JOIN prompt_layout USING(id) WHERE id=1")
       .get();
     return {
       prompt: String(row?.prompt ?? ""),
+      responseLanguage: isResponseLanguage(row?.responseLanguage) ? row.responseLanguage : "auto",
       order: row?.block_order ? JSON.parse(String(row.block_order)) : defaultOrder,
     };
   }
-  setPromptSettings(value: PromptSettings, previous: string, previousOrder: Block[]) {
+  setResponseLanguage(language: ResponseLanguage, previous: ResponseLanguage) {
+    return this.db.prepare("UPDATE shared_prompt SET responseLanguage=? WHERE id=1 AND responseLanguage=?")
+      .run(language, previous).changes === 1;
+  }
+  setPromptSettings(value: Pick<PromptSettings, "prompt" | "order">, previous: string, previousOrder: Block[]) {
     const current = this.promptSettings();
     if (current.prompt !== previous || current.order.join() !== previousOrder.join()) return false;
     this.db.exec("BEGIN");

@@ -108,7 +108,7 @@ test("기존 파일 첨부를 유지하고 지식 참조 설정을 재시작 후
   const file = store.addReference(session.id, project, "이전.md", "v1", 1, 1, "파일");
   store.close();
   const old = new DatabaseSync(path);
-  old.exec("ALTER TABLE file_references DROP COLUMN kind; DROP TABLE reviews; PRAGMA user_version=3");
+  old.exec("ALTER TABLE shared_prompt DROP COLUMN responseLanguage; ALTER TABLE file_references DROP COLUMN kind; DROP TABLE reviews; PRAGMA user_version=3");
   old.close();
   store = new SessionStore(path);
   try {

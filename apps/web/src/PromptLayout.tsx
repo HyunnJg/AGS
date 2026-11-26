@@ -187,7 +187,7 @@ export function SharedPrompt({ token, session }: { token: string; session?: Sess
       </label>
       <details className="context-preview">
         <summary>고정 지침 미리보기</summary>
-        <pre>{systemText(prompt, session?.preset ?? "general")}</pre>
+        <pre>{systemText(prompt, session?.preset ?? "general", stored?.responseLanguage)}</pre>
       </details>
       <strong>컨텍스트 주입 순서</strong>
       <small>

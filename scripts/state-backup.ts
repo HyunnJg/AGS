@@ -150,8 +150,10 @@ async function restoreInto(file: string, stage: string) {
       if (!Array.isArray(record) || verified) throw invalid();
       const [kind, key, value] = record;
       if (!header) {
-        if (kind !== format || key !== 1 || value !== schema(db))
+        if (kind !== format || key !== 1 || (value !== 5 && value !== schema(db)))
           throw new BackupError("이 AGS 버전에서 복원할 수 없는 백업 형식 또는 DB 버전입니다.");
+        // v5 shared_prompt rows predate the language column. SQLite supplies its default on insert.
+        if (value === 5) remaining.set("shared_prompt", ["id", "prompt"]);
         header = true;
       } else if (kind === "sha256") {
         if (remaining.size || key !== hash.digest("hex")) throw invalid();

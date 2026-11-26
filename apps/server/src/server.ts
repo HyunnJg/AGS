@@ -8,7 +8,7 @@ import { workspaceApi } from "./workspace-api.ts";
 import { checkKnowledgeSource } from "./knowledge-source.ts";
 import { WorkspaceError } from "./workspace-files.ts";
 import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
-import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
+import { isBlockOrder, isResponseLanguage, maxSourceLength } from "../../../packages/contracts/src/context.ts";
 import { assembleContext } from "./context.ts";
 import { type ContextLimits, isLimits, maxPromptLength } from "../../../packages/contracts/src/context.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -114,6 +114,7 @@ export function createChatServer(
       db.references(session.id),
       current?.text,
       texts,
+      shared.responseLanguage,
     );
     const included = new Set(
       assembled.messages.filter((_, i) => assembled.blocks[i] === "memory").map((m) => m.content),
@@ -222,6 +223,18 @@ export function createChatServer(
       if (!store.setDisplayRules(body.revision, body.rules as DisplayRule[]))
         throw new RequestError(409, "settings_changed");
       return json(store.displaySettings());
+    }
+    if (path === "/api/settings/response-language" && store) {
+      if (req.method === "GET") return json({ language: store.promptSettings().responseLanguage });
+      if (req.method !== "PUT") return allow("GET, PUT");
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" ||
+          !("language" in body) || !isResponseLanguage(body.language) ||
+          !("previous" in body) || !isResponseLanguage(body.previous))
+        throw new RequestError(400, "invalid_language");
+      if (!store.setResponseLanguage(body.language, body.previous))
+        throw new RequestError(409, "settings_changed");
+      return json({ language: body.language });
     }
     if (path === "/api/settings/prompt" && store) {
       if (req.method === "GET") return json(store.promptSettings());
