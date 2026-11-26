@@ -98,6 +98,8 @@ export async function workspaceApi(
       return json({ saved: true });
     }
     if (action === "attach") {
+      const kind = "kind" in body ? body.kind : "file";
+      if (kind !== "file" && kind !== "knowledge") throw new WorkspaceError(400, "invalid_reference_kind");
       if (!("session" in body) || typeof body.session !== "string" || !store.get(body.session))
         throw new WorkspaceError(404, "unknown_session");
       if (
@@ -132,6 +134,7 @@ export async function workspaceApi(
         page.start,
         page.end,
         page.text,
+        kind,
       );
       if (!reference) throw new WorkspaceError(409, "reference_limit");
       return json({ id: reference });

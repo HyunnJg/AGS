@@ -56,14 +56,17 @@ function FileBrowser({
   current,
   section,
   refresh,
+  knowledge = false,
 }: {
+  knowledge?: boolean;
   section: Section;
   refresh: (id: string) => Promise<void>;
   token: string;
   project: Project;
   current: Session | undefined;
 }) {
-  const [view, setView] = useState(top);
+  const [view, setView] = useState<View>(knowledge ? { path: "INDEX.md", position: 1, folder: false } : top);
+  const [trail, setTrail] = useState<View[]>([]);
   const [saved, setSaved] = useState("");
   const [data, setData] = useState<{
     view: View;
@@ -94,10 +97,10 @@ function FileBrowser({
   }, [project.id, token, view, project.root]);
   const result = data?.view === view ? data : undefined;
   const nextOffset = result?.dir?.next;
-  const enter = (path: string, folder: boolean) => {
+  const enter = (path: string, folder: boolean, position = 1) => {
     setSaved("");
-    setView({ path, folder, position: folder ? 0 : 1 });
-    setLine("1");
+    setView({ path, folder, position: folder ? 0 : position });
+    setLine(String(position));
   };
   const jump = (position: number) => {
     setView({
@@ -109,41 +112,60 @@ function FileBrowser({
     setLine(String(position));
   };
   return (
-    <section className="file-browser" aria-label="작업 파일">
+    <section className="file-browser" aria-label={knowledge ? "지식 문서" : "작업 파일"}>
       <header>
         <strong>{view.path || "작업 폴더"}</strong>
-        {view.path && (
+        {knowledge && trail.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              const previous = trail[trail.length - 1];
+              if (!previous) return;
+              setTrail(trail.slice(0, -1));
+              setView(previous);
+              setLine(String(previous.position));
+            }}
+          >
+            이전 문서
+          </button>
+        )}
+        {!knowledge && view.path && (
           <button type="button" onClick={() => enter(view.path.split("/").slice(0, -1).join("/"), true)}>
             상위 폴더
           </button>
         )}
       </header>
-      <SectionStateSource
-        key={section.id}
-        token={token}
-        project={project}
-        section={section}
-        path={view.path}
-        file={result?.file}
-        refresh={refresh}
-      />
-      <WorkspaceSearch
-        token={token}
-        project={project}
-        folder={view.folder ? view.path : view.path.split("/").slice(0, -1).join("/")}
-        open={(hit) => {
-          setSaved("");
-          setView({
-            path: hit.path,
-            folder: false,
-            position: hit.line,
-            version: hit.version,
-            excerpt: hit.excerpt,
-          });
-          setLine(String(hit.line));
-        }}
-      />
-      {project.writable && result && (result.dir || result.file) && (
+      {!knowledge && (
+        <>
+          <SectionStateSource
+            key={section.id}
+            token={token}
+            project={project}
+            section={section}
+            path={view.path}
+            file={result?.file}
+            refresh={refresh}
+          />
+          <WorkspaceSearch
+            token={token}
+            project={project}
+            folder={view.folder ? view.path : view.path.split("/").slice(0, -1).join("/")}
+            open={(hit) => {
+              setSaved("");
+              setView({
+                path: hit.path,
+                folder: false,
+                position: hit.line,
+                version: hit.version,
+                excerpt: hit.excerpt,
+              });
+              setLine(String(hit.line));
+            }}
+          />
+        </>
+      )}
+      {knowledge && <small>안내도의 링크를 따라가서 대화에 사용할 원본 범위를 고르세요.</small>}
+      {!knowledge && project.writable && result && (result.dir || result.file) && (
         <FileWrite
           key={`${view.path}:${result.file?.version ?? "directory"}`}
           token={token}
@@ -162,6 +184,9 @@ function FileBrowser({
       {result?.error && (
         <>
           <p role="alert">{result.error}</p>
+          {knowledge && view.path === "INDEX.md" && (
+            <small>연결한 작업 폴더의 INDEX.md가 지식 안내도의 시작 문서입니다.</small>
+          )}
           {result.stale && (
             <button type="button" onClick={() => enter(view.path, false)}>
               최신 파일 1줄부터 열기
@@ -209,8 +234,16 @@ function FileBrowser({
           </small>
           {view.excerpt && result.file.clipped && <p>검색 일치 부분 · {view.excerpt}</p>}
           <pre>{result.file.text}</pre>
-          {view.path.split("/").at(-1)?.toLowerCase() === "index.md" && (
-            <IndexLinks path={view.path} text={result.file.text} open={(p) => enter(p, false)} />
+          {((knowledge && /\.md$/i.test(view.path)) ||
+            view.path.split("/").at(-1)?.toLowerCase() === "index.md") && (
+            <IndexLinks
+              path={view.path}
+              text={result.file.text}
+              open={(p, line) => {
+                if (knowledge) setTrail((previous) => [...previous.slice(-31), view]);
+                enter(p, false, line);
+              }}
+            />
           )}
           {current && result.file.total > 0 && (
             <AttachLines
@@ -219,10 +252,12 @@ function FileBrowser({
               project={project}
               path={view.path}
               page={result.file}
+              kind={knowledge ? "knowledge" : "file"}
               session={current}
               reopen={() => enter(view.path, false)}
             />
           )}
+          {knowledge && !current && <small>대화를 열면 선택한 줄을 지식 발췌로 추가할 수 있습니다.</small>}
           {result.file.clipped && <small>긴 줄은 앞 2,048자까지 표시합니다.</small>}
           {result.file.total > 0 && (
             <form
@@ -260,10 +295,21 @@ function FileBrowser({
     </section>
   );
 }
-function IndexLinks({ path, text, open }: { path: string; text: string; open: (p: string) => void }) {
-  const links = new Map<string, string>();
-  for (const match of text.matchAll(/(?:^|[^!])\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
-    const target = match[2]?.split("#")[0];
+function IndexLinks({
+  path,
+  text,
+  open,
+}: {
+  path: string;
+  text: string;
+  open: (p: string, line: number) => void;
+}) {
+  const links = new Map<string, { label: string; path: string; line: number }>();
+  for (const match of text.matchAll(/(?<!!)\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
+    const [target, anchor] = (match[2] ?? "").split("#");
+    const line = /^L([1-9]\d*)(?:-L[1-9]\d*)?$/.exec(anchor ?? "");
+    const position = line ? Number(line[1]) : 1;
+    if (!Number.isSafeInteger(position)) continue;
     if (!target || /[:\\]/.test(target) || target.startsWith("/")) continue;
     const parts = path.split("/").slice(0, -1);
     let valid = true;
@@ -276,14 +322,18 @@ function IndexLinks({ path, text, open }: { path: string; text: string; open: (p
         parts.pop();
       } else if (p && p !== ".") parts.push(p);
     }
-    if (valid && parts.length) links.set(parts.join("/"), match[1] ?? target);
+    if (valid && parts.length) {
+      const path = parts.join("/");
+      links.set(`${path}#${position}`, { label: match[1] ?? target, path, line: position });
+    }
   }
   return (
     links.size > 0 && (
       <section className="index-links" aria-label="안내도 링크">
-        {[...links].map(([p, label]) => (
-          <button type="button" key={p} onClick={() => open(p)}>
-            {label} · {p}
+        {[...links].map(([key, link]) => (
+          <button type="button" key={key} onClick={() => open(link.path, link.line)}>
+            {link.label} · {link.path}
+            {link.line > 1 && ` · ${link.line}줄`}
           </button>
         ))}
       </section>
@@ -378,7 +428,7 @@ export function ProjectWorkspace({
   openSession: (session: Session) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [activity, setActivity] = useState(false);
+  const [tab, setTab] = useState<"files" | "knowledge" | "activity">("files");
   const [catalog, setCatalog] = useState<WorkspaceCatalog>();
   const [projectId, setProject] = useState(() => sessionStorage.getItem("ags-project") ?? ""),
     [sectionId, setSection] = useState("");
@@ -537,14 +587,17 @@ export function ProjectWorkspace({
                 ))}
             </div>
             <fieldset className="workspace-views" aria-label="작업공간 보기">
-              <button type="button" aria-pressed={!activity} onClick={() => setActivity(false)}>
+              <button type="button" aria-pressed={tab === "files"} onClick={() => setTab("files")}>
                 파일
               </button>
-              <button type="button" aria-pressed={activity} onClick={() => setActivity(true)}>
+              <button type="button" aria-pressed={tab === "knowledge"} onClick={() => setTab("knowledge")}>
+                지식 안내도
+              </button>
+              <button type="button" aria-pressed={tab === "activity"} onClick={() => setTab("activity")}>
                 활동 기록
               </button>
             </fieldset>
-            <div hidden={activity}>
+            <div hidden={tab !== "files"}>
               <ProjectFolder
                 section={section}
                 current={current}
@@ -554,7 +607,21 @@ export function ProjectWorkspace({
                 refresh={refresh}
               />
             </div>
-            {activity && <WorkspaceActivity token={token} project={project.id} />}
+            {tab === "knowledge" &&
+              (project.root && section ? (
+                <FileBrowser
+                  key={project.root}
+                  token={token}
+                  project={project}
+                  section={section}
+                  current={current}
+                  refresh={refresh}
+                  knowledge
+                />
+              ) : (
+                <small>파일 탭에서 프로젝트의 작업 폴더를 먼저 연결하세요.</small>
+              ))}
+            {tab === "activity" && <WorkspaceActivity token={token} project={project.id} />}
           </section>
         )}
       </div>

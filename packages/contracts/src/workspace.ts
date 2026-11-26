@@ -55,6 +55,9 @@ export interface FileActivity {
 }
 
 export interface FileReference {
+  kind: "file" | "knowledge";
+  version: string;
+  paused: boolean;
   id: string;
   project: string;
   path: string;

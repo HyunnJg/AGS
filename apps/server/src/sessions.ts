@@ -1,7 +1,7 @@
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
 import type { Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
-import type { RegisteredRoot } from "./workspace-files.ts";
+import { WorkspaceError, type RegisteredRoot } from "./workspace-files.ts";
 import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
 import {
   defaultOrder,
@@ -61,6 +61,8 @@ export class SessionStore {
         WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
           DELETE FROM section_state_source WHERE section IN (SELECT id FROM sections WHERE projectId=NEW.id);
         END;
+        CREATE TABLE IF NOT EXISTS knowledge_setting(id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO knowledge_setting VALUES(1,1);
         CREATE TABLE IF NOT EXISTS checkpoint_setting(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL);
         INSERT OR IGNORE INTO checkpoint_setting VALUES(1,1);
         CREATE TABLE IF NOT EXISTS checkpoints(
@@ -107,6 +109,9 @@ export class SessionStore {
           "ALTER TABLE projects ADD COLUMN writeGrant TEXT; ALTER TABLE file_activity ADD COLUMN backup TEXT; PRAGMA user_version=3",
         );
       }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 3) {
+        this.db.exec("ALTER TABLE file_references ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'; PRAGMA user_version=4");
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.close();
@@ -115,10 +120,12 @@ export class SessionStore {
   }
 
   references(session: string): FileReference[] {
-    return this.db
-      .prepare(`SELECT r.id,p.name AS project,r.path,r.start,r.end,r.text FROM file_references r
+    const rows = this.db
+      .prepare(`SELECT r.id,p.name AS project,r.path,r.start,r.end,r.text,r.kind,r.version FROM file_references r
       JOIN projects p ON p.id=r.project WHERE r.session=? ORDER BY r.rowid`)
-      .all(session) as unknown as FileReference[];
+      .all(session) as unknown as Omit<FileReference, "paused">[];
+    const enabled = this.knowledgeEnabled();
+    return rows.map(row => ({ ...row, paused: row.kind === "knowledge" && !enabled }));
   }
   addReference(
     session: string,
@@ -128,12 +135,15 @@ export class SessionStore {
     start: number,
     end: number,
     text: string,
+    kind: FileReference["kind"] = "file",
   ) {
+    if (kind === "knowledge" && !this.knowledgeEnabled()) throw new WorkspaceError(409, "knowledge_disabled");
     const prior = this.db
       .prepare(
-        "SELECT id FROM file_references WHERE session=? AND project=? AND path=? AND version=? AND start=? AND end=?",
+        "SELECT id,kind FROM file_references WHERE session=? AND project=? AND path=? AND version=? AND start=? AND end=?",
       )
       .get(session, project, path, version, start, end);
+    if (prior && prior.kind !== kind) throw new WorkspaceError(409, "reference_kind_conflict");
     if (prior) return String(prior.id);
     const size = this.db.prepare("SELECT count(*) AS n FROM file_references WHERE session=?").get(session);
     if (Number(size?.n) >= maxReferences) return null;
@@ -142,9 +152,9 @@ export class SessionStore {
     try {
       this.db
         .prepare(
-          "INSERT INTO file_references(id,session,project,path,version,start,end,text) VALUES(?,?,?,?,?,?,?,?)",
+          "INSERT INTO file_references(id,session,project,path,version,start,end,text,kind) VALUES(?,?,?,?,?,?,?,?,?)",
         )
-        .run(id, session, project, path, version, start, end, text);
+        .run(id, session, project, path, version, start, end, text, kind);
       this.recordFileActivity(project, "attach", path, null, start, end);
       this.db.exec("COMMIT");
       return id;
@@ -232,6 +242,12 @@ export class SessionStore {
   }
   setMemoryEnabled(enabled: boolean) {
     this.db.prepare("UPDATE memory_settings SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  knowledgeEnabled() {
+    return this.db.prepare("SELECT enabled FROM knowledge_setting WHERE id=1").get()?.enabled === 1;
+  }
+  setKnowledgeEnabled(enabled: boolean) {
+    this.db.prepare("UPDATE knowledge_setting SET enabled=? WHERE id=1").run(Number(enabled));
   }
   updateMemoryEnabled() {
     return this.db.prepare("SELECT enabled FROM checkpoint_setting WHERE id=1").get()?.enabled === 1;

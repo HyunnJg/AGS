@@ -8,6 +8,8 @@ export class SettingsConflict extends Error {
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 const workspaceMessages: Record<string, string> = {
+  knowledge_disabled: "설정 → 토글형 모듈에서 외부 지식 참조를 켜면 지식 발췌를 추가할 수 있습니다.",
+  reference_kind_conflict: "이 범위는 이미 다른 방식으로 첨부했습니다. 첨부 자료에서 뺀 뒤 다시 선택하세요.",
   checkpoint_too_long: "생성된 요약이 너무 깁니다. 다시 생성하세요.",
   checkpoint_busy: "이 대화의 구간 요약을 처리 중입니다.",
   no_checkpoint_turns: "아직 기록할 새 완료 턴이 없습니다.",
@@ -86,7 +88,7 @@ export async function api(
     }
     if (path.startsWith("/api/settings/connections/")) {
       if (res.status === 409) throw new SettingsConflict();
-      const { error } = await res.json();
+      const { error } = await res.json().catch(() => ({}));
       if (error === "new_endpoint_key") throw new Error("주소가 바뀌었습니다. 새 키를 입력하거나 기존 키 제거를 선택하세요.");
       if (error === "invalid_connection_url") throw new Error("API 기본 주소를 확인하세요. 원격 서버는 HTTPS를 사용하세요.");
       if (error === "invalid_connection") throw new Error("모델 ID와 API 키에 공백이나 허용되지 않는 문자가 있는지 확인하세요.");
