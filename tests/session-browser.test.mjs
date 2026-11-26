@@ -190,7 +190,8 @@ test(
       await rm(dir, { recursive: true, force: true });
     });
     const base = await start(0);
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
     await page.goto(base);
@@ -902,6 +903,61 @@ test(
     await switchModel("mock", "");
     await editor.locator("summary").first().click();
     await editor.getByRole("combobox").selectOption(JSON.stringify(["openai", "ui/openai-text"]));
+    const chatDraft = page.getByLabel("메시지", {exact:true});
+    await chatDraft.fill("탭 전환 전 채팅 초안");
+    const reviewTarget = editor.getByRole("combobox");
+    const reviewDraft = editor.getByLabel("검토 모델에 보낼 내용");
+    await reviewDraft.fill("탭 전환 전 검토 초안");
+    const other = await context.newPage();
+    await other.goto(base);
+    await other.getByLabel("로컬 인증 토큰").fill(token);
+    await other.getByRole("button", {name:"작업실 열기"}).click();
+    await other.getByRole("button", {name:"설정", exact:true}).click();
+    await other.getByRole("button", {name:"OpenAI", exact:true}).click();
+    await other.getByLabel("모델 ID", {exact:true}).fill("ui/alternate");
+    await other.getByRole("button", {name:"선택 모델을 기본값으로 저장"}).click();
+    await other.getByText("공급자 기본 모델 · ui/alternate", {exact:true}).waitFor();
+
+    async function returnToChat() {
+      await page.bringToFront();
+      // Headless Chromium may keep multiple pages focused. Deliver the tab's window focus event explicitly.
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    }
+    await returnToChat();
+    const alternate = quick.getByRole("option", {name:"OpenAI · ui/alternate", exact:true});
+    await alternate.waitFor({state:"attached"});
+    assert.equal(await quick.inputValue(), JSON.stringify(["mock", ""]));
+    assert.equal(await reviewTarget.inputValue(), "");
+    assert.equal(await reviewTarget.locator("option:checked").textContent(), "검토 모델을 다시 선택하세요");
+    assert.ok(await editor.getByRole("button", {name:"승인하고 검토 요청"}).isDisabled());
+    await reviewTarget.selectOption(JSON.stringify(["openai", "ui/alternate"]));
+    await switchModel("openai", "ui/alternate");
+
+    await other.bringToFront();
+    await other.getByText("연결 설정", {exact:true}).click();
+    await other.getByLabel("저장 시 기존 키 제거").check();
+    await other.getByRole("button", {name:"연결 저장"}).click();
+    await other.getByText("연결 설정을 저장했습니다.", {exact:true}).waitFor();
+    await returnToChat();
+    await page.waitForFunction(() => Array.from(document.querySelector(".quick-model").options)
+      .some(option => option.value === JSON.stringify(["openai", "ui/alternate"]) && option.disabled));
+    assert.equal(await reviewTarget.inputValue(), "");
+    assert.equal(await reviewTarget.getByRole("option", {name:/ui\/alternate/}).count(), 0);
+    assert.equal(await quick.inputValue(), JSON.stringify(["openai", "ui/alternate"]));
+    assert.ok(await page.getByRole("button", {name:"전송 ↑", exact:true}).isDisabled());
+    assert.equal(await chatDraft.inputValue(), "탭 전환 전 채팅 초안");
+    assert.equal(await reviewDraft.inputValue(), "탭 전환 전 검토 초안");
+
+    await other.bringToFront();
+    await other.getByLabel("API 키", {exact:true}).fill("openai-ui-fixture");
+    await other.getByLabel("기본 모델 ID").fill("ui/openai-text");
+    await other.getByRole("button", {name:"연결 저장"}).click();
+    await other.getByText("공급자 기본 모델 · ui/openai-text", {exact:true}).waitFor();
+    await other.close();
+    await returnToChat();
+    await reviewTarget.selectOption(JSON.stringify(["openai", "ui/openai-text"]));
+    await switchModel("mock", "");
+    await chatDraft.fill("");
     await editor.getByLabel("검토 모델에 보낼 내용").fill("직접 연결 검토 확인");
     await editor.getByRole("button", { name: "승인하고 검토 요청" }).click();
     const directReply = editor.getByLabel("반영할 검토 내용");

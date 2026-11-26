@@ -168,8 +168,9 @@ export function ReviewEditor({
       window.removeEventListener("focus", settings);
     };
   }, [open, token, latest, session.sectionId, busy]);
+  const available = choices.some((c) => JSON.stringify([c.provider, c.model]) === selection);
   async function send() {
-    if (controller.current || missing || preview.length > reviewInputLimit) return;
+    if (!available || controller.current || missing || preview.length > reviewInputLimit) return;
     const [provider, model] = JSON.parse(selection);
     const key = JSON.stringify([selection, message.trim(), selectedIds]);
     if (attempt.current?.key !== key) attempt.current = { key, id: crypto.randomUUID() };
@@ -211,7 +212,6 @@ export function ReviewEditor({
     }
   }
   const pending = busy || review?.status === "streaming";
-  const available = choices.some((c) => JSON.stringify([c.provider, c.model]) === selection);
   return (
     <details className="checkpoint-editor review-editor" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>다른 모델에 검토 요청</summary>
@@ -219,7 +219,8 @@ export function ReviewEditor({
       <fieldset disabled={!enabled || pending}>
         <label>
           검토 모델
-          <select value={selection} onChange={(e) => setSelection(e.target.value)}>
+          <select value={available ? selection : ""} onChange={(e) => setSelection(e.target.value)}>
+            {!available && <option value="" disabled>검토 모델을 다시 선택하세요</option>}
             {choices.map((c) => (
               <option
                 key={JSON.stringify([c.provider, c.model])}

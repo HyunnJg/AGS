@@ -123,6 +123,7 @@ function Conversation({
     if (session.provider === option.id) models.add(session.model);
     for (const model of models) choices.push({ provider: option.id, model });
   }
+  const providerEnabled = options.some(option => option.id === session.provider && option.enabled);
   const reviewChoices = choices.filter(choice => options.some(o => o.id === choice.provider && o.enabled));
   const references = useFileReferences(token, session.id);
   const path = `/api/sessions/${session.id}`;
@@ -180,7 +181,7 @@ function Conversation({
   async function send(e: FormEvent) {
     e.preventDefault();
     const message = text.trim();
-    if (!message || savingPreset || sending.current || remoteStreaming || !ready) return;
+    if (!message || savingPreset || sending.current || remoteStreaming || !ready || !providerEnabled) return;
     sending.current = true;
     setBusy(true);
     activity(session.id, true);
@@ -329,6 +330,7 @@ function Conversation({
               }
             }}
           />
+          {!providerEnabled && <small>{providerNames[session.provider]} 연결을 확인하거나 다른 모델을 선택하세요.</small>}
           <div className="actions">
             <select
               className="quick-model"
@@ -360,7 +362,7 @@ function Conversation({
               <button
                 type="submit"
                 className="primary"
-                disabled={!ready || !text.trim() || remoteStreaming || savingPreset}
+                disabled={!ready || !text.trim() || remoteStreaming || savingPreset || !providerEnabled}
               >
                 전송 ↑
               </button>
@@ -376,10 +378,11 @@ function Conversation({
 function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [id, setId] = useState("");
-  const [ready, setReady] = useState(false);
+  const [sessionsReady, setSessionsReady] = useState(false);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
+  const ready = sessionsReady && options.length > 0;
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -387,32 +390,30 @@ function Workspace({ token }: { token: string }) {
   const [favorites, setFavorites] = useState<ModelSelection[]>([]);
   useEffect(() => {
     if (settings) return;
-    let alive = true;
+    let pending: AbortController | undefined;
     const reload = () => {
-      api(token, "/api/settings/display-rules")
-        .then((r) => r.json())
-        .then((data) => {
-          if (alive)
-            setDisplayRules((prev) =>
-              JSON.stringify(prev) === JSON.stringify(data.rules) ? prev : data.rules,
-            );
-        })
-        .catch((e) => {
-          if (alive) setError(problem(e));
-        });
-      api(token, "/api/settings/favorites")
-        .then((r) => r.json())
-        .then((rows) => {
-          if (alive) setFavorites(rows);
-        })
-        .catch((e) => {
-          if (alive) setError(problem(e));
-        });
+      pending?.abort();
+      pending = new AbortController();
+      const { signal } = pending;
+      async function read<T>(path: string, update: (value: T) => void) {
+        try {
+          const response = await api(token, path, "GET", undefined, signal);
+          const data: T = await response.json();
+          if (!signal.aborted) update(data);
+        } catch (e) {
+          if (!signal.aborted) setError(problem(e));
+        }
+      }
+      void read<ProviderOption[]>("/api/providers", setOptions);
+      void read<ModelSelection[]>("/api/settings/favorites", setFavorites);
+      void read<{ rules: DisplayRule[] }>("/api/settings/display-rules", ({ rules }) => {
+        setDisplayRules((prev) => JSON.stringify(prev) === JSON.stringify(rules) ? prev : rules);
+      });
     };
     reload();
     window.addEventListener("focus", reload);
     return () => {
-      alive = false;
+      pending?.abort();
       window.removeEventListener("focus", reload);
     };
   }, [token, settings]);
@@ -426,7 +427,7 @@ function Workspace({ token }: { token: string }) {
   const [running, setRunning] = useState<string[]>([]);
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
-  const mounted = sessions.filter((s) => s.id === id || running.includes(s.id));
+  const mounted = ready ? sessions.filter((s) => s.id === id || running.includes(s.id)) : [];
   const select = useCallback((id: string) => {
     setId(id);
     sessionStorage.setItem("ags-session", id);
@@ -435,15 +436,11 @@ function Workspace({ token }: { token: string }) {
     let alive = true;
     (async () => {
       try {
-        const [rows, choices]: [Session[], ProviderOption[]] = await Promise.all([
-          api(token, "/api/sessions").then((r) => r.json()),
-          api(token, "/api/providers").then((r) => r.json()),
-        ]);
+        const rows: Session[] = await (await api(token, "/api/sessions")).json();
         if (alive) {
-          setOptions(choices);
           setSessions(rows);
           select(rows.find((s) => s.id === sessionStorage.getItem("ags-session"))?.id ?? rows[0]?.id ?? "");
-          setReady(true);
+          setSessionsReady(true);
         }
       } catch (e) {
         if (alive) setError(problem(e));

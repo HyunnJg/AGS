@@ -180,7 +180,7 @@ export function ProviderConnection({
           )}
         </div>
       )}
-      {message && <output>{message}</output>}
+      {message && <output className="connection-status">{message}</output>}
       {message && (!view || message.includes("다른 창")) && (
         <button type="button" onClick={() => reload((n) => n + 1)}>
           연결 설정 다시 읽기
