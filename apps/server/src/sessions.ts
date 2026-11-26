@@ -276,6 +276,9 @@ export class SessionStore {
   setLogsEnabled(enabled: boolean) {
     this.db.prepare("UPDATE call_log_setting SET enabled=? WHERE id=1").run(Number(enabled));
   }
+  clearCallLogs() {
+    return Number(this.db.prepare("DELETE FROM call_log").run().changes);
+  }
   startCall(kind: CallKind, selection: ModelSelection, session: string | null) {
     try {
       if (!this.logsEnabled()) return;
@@ -283,13 +286,13 @@ export class SessionStore {
       return;
     }
     const capture = new CallCapture(kind, selection, session, (log) => {
-      const { headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
+      const { request, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
       this.db
         .prepare("INSERT INTO call_log VALUES(?,?,?)")
         .run(
           log.id,
           JSON.stringify(summary),
-          JSON.stringify({ headers, body, bodyLimited, answer, answerLimited }),
+          JSON.stringify({ request, headers, body, bodyLimited, answer, answerLimited }),
         );
     });
     this.protectCall?.(capture);

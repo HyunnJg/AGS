@@ -101,6 +101,17 @@ test(
     await call(path, "PATCH", { provider: "custom", model: "fixture/model" });
     const send = (message: string) => call(`${path}/chat`, "POST", { message });
     assert.match(await (await send("first")).text(), /event: done/);
+    const checkSummary = () => {
+      const sent = requests.at(-1);
+      assert.ok(sent);
+      assert.deepEqual(store.callDetails()[0]?.request, {
+        messageCount: sent.messages.length,
+        contentBytes: sent.messages.reduce((total, m) => total + Buffer.byteLength(m.content), 0),
+        maxTokens: sent.max_tokens ?? null,
+      });
+      assert.ok(!("request" in (store.callList()[0] ?? {})));
+    };
+    checkSummary();
     const displayPath = "/api/settings/display-rules";
     const rule = {
       id: "label",
@@ -188,6 +199,7 @@ test(
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);
+    checkSummary();
     assert.equal((await call("/api/settings/knowledge", "PUT", { enabled: true })).status, 200);
     const withKnowledge = await (await call(`${path}/context-preview`, "POST", { message: "방법 확인", limits })).json();
     assert.ok(withKnowledge.messages.some((m: {content: string}) => m.content === "지식 발췌 (참고 자료) · 참고 문서 / guide.md · 1–1줄\n방법론"));
@@ -219,6 +231,7 @@ test(
       assert.ok(!wire.includes(secret) && !wire.includes("Bearer"));
       assert.ok(wire.includes(expected ?? "") && !wire.includes("event: done"));
       assert.equal(store.turns(a.id).at(-1)?.status, "failed");
+      checkSummary();
     }
     const exported = await (await call("/api/call-logs/export", "GET")).json();
     assert.ok(
@@ -271,6 +284,18 @@ test(
     assert.equal(timedOut?.status, "timeout");
     assert.equal(cancelled?.status, "cancelled");
     assert.equal(cancelled?.answer, "한글");
+    const logsPath = "/api/call-logs";
+    const count = store.callList().length;
+    const turns = store.turns(a.id);
+    assert.equal((await fetch(base + logsPath, { method: "DELETE" })).status, 401);
+    assert.equal((await fetch(base + logsPath, { method: "DELETE", headers: { ...headers, origin: "https://example.org" } })).status, 403);
+    for (const suffix of ["/export", `/${authFailure.id}`])
+      assert.equal((await call(logsPath + suffix, "DELETE")).status, 405);
+    assert.deepEqual(await (await call(logsPath, "DELETE")).json(), { deleted: count });
+    assert.deepEqual(await (await call(logsPath, "DELETE")).json(), { deleted: 0 });
+    assert.equal((await call(`${logsPath}/${authFailure.id}`, "GET")).status, 404);
+    assert.deepEqual(await (await call(`${logsPath}/export`, "GET")).json(), []);
+    assert.deepEqual(store.turns(a.id), turns);
     const b = await (await call("/api/sessions", "POST")).json();
     assert.equal(store.history(b.id).length, 0);
     assert.deepEqual(await (await call(`/api/sessions/${b.id}/context`, "GET")).json(), {

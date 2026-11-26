@@ -3,7 +3,12 @@ import { callKinds, type CallLog, type CallSummary } from "../../../packages/con
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
 import { api } from "./api.ts";
 
-const statuses = { completed: "완료", failed: "실패", cancelled: "중단", timeout: "시간 초과" };
+const statuses = {
+  completed: "완료",
+  failed: "실패",
+  cancelled: "중단",
+  timeout: "시간 초과",
+};
 
 function download(value: unknown, filename: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
@@ -39,10 +44,30 @@ function CallDetail({ token, id }: { token: string; id: string }) {
         {new Date(log.started).toLocaleString()} · {statuses[log.status]} · {log.durationMs}ms ·{" "}
         {log.httpStatus ? `HTTP ${log.httpStatus}` : noHttp}
       </p>
-      <small>호출 ID {log.id}{log.session && ` · 대화 ${log.session}`}</small>
+      <small>
+        호출 ID {log.id}
+        {log.session && ` · 대화 ${log.session}`}
+      </small>
       <button type="button" onClick={() => download(log, `AGS-call-${id}.json`)}>
         이 호출 JSON 다운로드
       </button>
+      <h4>요청 요약</h4>
+      {log.request ? (
+        <p>
+          모델 {log.model} · 메시지 {log.request.messageCount}개 · 본문 합계{" "}
+          {log.request.contentBytes.toLocaleString()} B (UTF-8)
+          {" · 출력 한도 "}
+          {log.request.maxTokens === null ? "미지정" : `${log.request.maxTokens.toLocaleString()}토큰`}
+        </p>
+      ) : (
+        <p>
+          {log.provider === "mock"
+            ? noHttp
+            : log.kind === "catalog"
+              ? "모델 목록 조회 · 요청 본문 없음"
+              : "저장된 요청 요약 없음"}
+        </p>
+      )}
       <h4>응답 헤더</h4>
       <pre>{log.httpStatus ? JSON.stringify(log.headers, null, 2) : noHttp}</pre>
       <h4>응답 본문</h4>
@@ -62,6 +87,7 @@ export function CallLogs({ token }: { token: string }) {
   const [id, setId] = useState("");
   const [error, setError] = useState("");
   const [query, refresh] = useState({ path: "/api/call-logs" });
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     const c = new AbortController();
     Promise.all([
@@ -77,24 +103,47 @@ export function CallLogs({ token }: { token: string }) {
       })
       .catch(() => {
         if (!c.signal.aborted) setError("호출 목록을 읽지 못했습니다.");
+      })
+      .finally(() => {
+        if (!c.signal.aborted) setLoading(false);
       });
     return () => c.abort();
   }, [token, query]);
-  async function action(exportAll: boolean) {
+  function reload() {
+    setLoading(true);
+    refresh({ path: "/api/call-logs" });
+  }
+  async function action(command: "download" | "toggle" | "clear") {
+    if (
+      command === "clear" &&
+      !window.confirm("현재 저장된 호출 로그를 모두 비울까요? 대화 기록은 유지됩니다.")
+    )
+      return;
     setBusy(true);
     setError("");
     try {
-      if (exportAll)
+      if (command === "download")
         download(
           await (await api(token, "/api/call-logs/export")).json(),
           `AGS-calls-${new Date().toISOString().slice(0, 10)}.json`,
         );
-      else
-        setEnabled(
-          (await (await api(token, "/api/settings/call-logs", "PUT", { enabled: !enabled })).json()).enabled,
-        );
+      else if (command === "clear") {
+        await api(token, "/api/call-logs", "DELETE");
+        setRows([]);
+        setId("");
+        reload();
+      } else {
+        const response = await api(token, "/api/settings/call-logs", "PUT", { enabled: !enabled });
+        setEnabled((await response.json()).enabled);
+      }
     } catch {
-      setError(exportAll ? "로그를 내려받지 못했습니다." : "기록 설정을 변경하지 못했습니다.");
+      setError(
+        {
+          download: "로그를 내려받지 못했습니다.",
+          toggle: "기록 설정을 변경하지 못했습니다.",
+          clear: "로그를 비우지 못했습니다.",
+        }[command],
+      );
     } finally {
       setBusy(false);
     }
@@ -105,18 +154,29 @@ export function CallLogs({ token }: { token: string }) {
         <input
           type="checkbox"
           checked={enabled === true}
-          disabled={enabled === undefined || busy}
-          onChange={() => void action(false)}
+          disabled={enabled === undefined || busy || loading}
+          onChange={() => void action("toggle")}
         />
         새 호출 기록
       </label>
       <small>최근 종료된 호출 100건을 이 PC에 보관합니다.</small>
       <div>
-        <button type="button" disabled={busy} onClick={() => refresh({ path: "/api/call-logs" })}>
+        <button type="button" disabled={busy || loading} onClick={reload}>
           목록 새로고침
         </button>{" "}
-        <button type="button" disabled={busy || !rows?.length} onClick={() => void action(true)}>
+        <button
+          type="button"
+          disabled={busy || loading || !rows?.length}
+          onClick={() => void action("download")}
+        >
           전체 JSON 다운로드
+        </button>{" "}
+        <button
+          type="button"
+          disabled={busy || loading || !rows?.length}
+          onClick={() => void action("clear")}
+        >
+          로그 비우기
         </button>
       </div>
       {error && <p role="alert">{error}</p>}

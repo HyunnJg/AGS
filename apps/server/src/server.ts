@@ -180,7 +180,8 @@ export function createChatServer(
     }
     const logRoute = /^\/api\/call-logs(?:\/(export|[a-f0-9-]{36}))?$/.exec(path);
     if (logRoute && store) {
-      if (req.method !== "GET") return allow("GET");
+      if (!logRoute[1] && req.method === "DELETE") return json({ deleted: store.clearCallLogs() });
+      if (req.method !== "GET") return allow(logRoute[1] ? "GET" : "GET, DELETE");
       if (!logRoute[1]) return json(store.callList());
       if (logRoute[1] === "export") return json(store.callDetails());
       const entry = store.callDetails(logRoute[1])[0];

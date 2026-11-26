@@ -98,6 +98,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     if (!url || (selection.provider === "openrouter" && !key) || selection.provider === "mock")
       throw new ProviderError("provider_failed");
     try {
+      capture?.recordRequest(messages, outputBudget);
       const response = await send(new URL("chat/completions", url).href, {
         method: "POST",
         redirect: "error",

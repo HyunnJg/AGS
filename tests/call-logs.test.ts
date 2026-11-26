@@ -43,4 +43,14 @@ test("호출별 본문과 답변은 독립적으로 제한되며 비밀값 제�
   for (let n = 0; n < 101; n++) start()?.finish("completed");
   assert.equal(db.callList().length, 100);
   assert.deepEqual(db.callDetails(first.id), []);
+  const inFlight = start();
+  db.setLogsEnabled(false);
+  assert.equal(db.clearCallLogs(), 100);
+  assert.equal(db.logsEnabled(), false);
+  inFlight?.finish("completed");
+  assert.equal(db.callList().length, 1);
+  assert.equal(db.clearCallLogs(), 1);
+  db.close();
+  db = new SessionStore(path);
+  assert.deepEqual(db.callDetails(), []);
 });
