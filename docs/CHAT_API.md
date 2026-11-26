@@ -103,3 +103,8 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 ### 공급자 연결 설정
 
 인증된 `GET /api/settings/connections/{openrouter|custom}`은 `revision`, `baseUrl`, `defaultModel`, 키 등록 여부(`hasKey`), 재입력 필요 여부(`needsKey`), 입력 키의 재시작 후 유지 여부(`persistentKeys`)를 반환한다. `PUT` 본문에는 읽은 revision과 새 baseUrl, defaultModel을 보낸다. OpenRouter는 고정 주소를 사용한다. 선택 필드 key를 생략하면 기존 키를 유지하고, 문자열로 교체하거나 null로 제거한다. 기존 키가 있을 때 사용자 지정 주소를 바꾸려면 키 교체 또는 제거를 명시해야 한다. 성공 응답은 갱신된 view와 공급자 options이며 오래된 revision은 409다. 공급자 키 원문은 응답에 포함하지 않는다.
+
+
+### 외부 지식 발췌
+
+`GET /api/settings/knowledge`로 전역 참조 상태를 확인하고 `PUT`으로 `{"enabled":false}` 또는 `true` 값을 저장한다. 초기값은 켜짐이다. 프로젝트의 기존 `attach` 요청에 `kind: "knowledge"`를 지정하면 지식 발췌로 저장한다. 생략 시 일반 파일 첨부로 처리한다. 원본 버전·줄 범위 검증과 대화당 8개 한도는 두 종류에 공통으로 적용된다. 같은 발췌를 다른 종류로 다시 등록하면 409를 반환한다. 대화의 `references`는 종류, 원본 버전, 참조 일시 중지 여부(`paused`)를 포함한다. 참조를 끄면 새 지식 첨부를 거부하고 미리보기와 전송에서 저장된 지식 발췌만 제외한다. 발췌는 첨부 당시의 스냅샷이다.

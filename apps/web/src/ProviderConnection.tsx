@@ -70,7 +70,11 @@ export function ProviderConnection({
       setView(data.view);
       setUrl(data.view.baseUrl);
       setModel(data.view.defaultModel);
-      setMessage("연결 설정을 저장했습니다.");
+      setMessage(
+        data.options.find((o: ProviderOption) => o.id === provider)?.enabled
+          ? "연결 설정을 저장했습니다. 아래에서 대화에 쓸 모델을 선택하고 적용하세요."
+          : "연결 설정을 저장했습니다.",
+      );
       onSave(data.options, data.view.defaultModel, view.defaultModel);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "연결 설정을 저장하지 못했습니다.");

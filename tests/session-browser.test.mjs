@@ -461,6 +461,38 @@ test(
     await page.getByLabel("승인형 저장 허용").check();
     await page.getByRole("button", { name: "승인형 저장으로 연결" }).click();
     await page.waitForFunction(() => document.querySelector(".file-write") !== null);
+    await panel.getByRole("button", {name:"지식 안내도"}).click();
+    const guide = panel.getByRole("region", {name:"지식 문서"});
+    await guide.getByRole("button", {name:/전시 자료 조사 방법/}).click();
+    await guide.getByRole("button", {name:/전시 연표의 날짜 검토/}).click();
+    await guide.getByRole("button", {name:/대조할 원본 기록/}).click();
+    await guide.getByText(/3–4 \/ 4줄/).waitFor();
+    assert.deepEqual(await refs(), []);
+    await guide.getByLabel("첨부 끝 줄").fill("3");
+    await guide.getByRole("button", {name:"지식 발췌 추가"}).click();
+    await guide.getByText("3–3줄을 첨부했습니다.").waitFor();
+    assert.ok((await previewRefs()).messages.some(m => m.content.includes("notes/register.md · 3–3줄")));
+    await guide.getByRole("button", {name:"이전 문서"}).click();
+    await guide.getByRole("button", {name:/대조할 원본 기록/}).waitFor();
+    await panel.getByRole("button", {name:"작업공간 닫기"}).click();
+    await page.getByRole("button", {name:"설정",exact:true}).click();
+    await page.getByRole("button", {name:"토글형 모듈"}).click();
+    const knowledgeToggle = page.getByLabel("외부 지식 참조");
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("dialog label"))
+      .find(label => label.textContent.trim() === "외부 지식 참조")?.querySelector("input:checked:enabled"));
+    const toggleOff = page.waitForResponse(r => r.url().endsWith("/settings/knowledge") && r.request().method() === "PUT");
+    await knowledgeToggle.click();
+    await toggleOff;
+    assert.ok(!(await previewRefs()).messages.some(m => m.content.includes("notes/register.md")));
+    assert.equal((await refs())[0].paused, true);
+    const toggleOn = page.waitForResponse(r => r.url().endsWith("/settings/knowledge") && r.request().method() === "PUT");
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("dialog label"))
+      .find(label => label.textContent.trim() === "외부 지식 참조")?.querySelector("input:not(:checked):enabled"));
+    await knowledgeToggle.click();
+    await toggleOn;
+    assert.equal((await refs())[0].paused, false);
+    await page.getByRole("button",{name:"설정 닫기"}).click();
+    await openWorkspace();
     await panel.getByRole("button", { name: "INDEX.md", exact: true }).click();
     await panel.getByRole("button", { name: "전시 안내 초안 · notes/intro.md" }).click();
     await panel.getByRole("button", { name: "파일 수정", exact: true }).click();

@@ -161,6 +161,9 @@ test(
     const projectId = store.addProject("참고 문서");
     const ref = store.addReference(a.id, projectId, "notes.md", "a".repeat(64), 2, 2, "선택한 줄");
     assert.ok(ref);
+    const knowledge = store.addReference(a.id, projectId, "guide.md", "b".repeat(64), 1, 1, "방법론", "knowledge");
+    assert.ok(knowledge);
+    assert.equal((await call("/api/settings/knowledge", "PUT", { enabled: false })).status, 200);
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
@@ -180,11 +183,17 @@ test(
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);
+    assert.equal((await call("/api/settings/knowledge", "PUT", { enabled: true })).status, 200);
+    const withKnowledge = await (await call(`${path}/context-preview`, "POST", { message: "방법 확인", limits })).json();
+    assert.ok(withKnowledge.messages.some((m: {content: string}) => m.content === "지식 발췌 (참고 자료) · 참고 문서 / guide.md · 1–1줄\n방법론"));
+    assert.match(await (await send("방법 확인")).text(), /event: done/);
+    assert.deepEqual(requests.at(-1)?.messages, withKnowledge.messages);
+    store.removeReference(a.id, knowledge);
     store.removeReference(a.id, ref);
     const before = store.turns(a.id).length;
     await call(`${path}/context`, "PUT", { ...limits, inputBudget: 1 });
     assert.equal((await send("큰 입력")).status, 422);
-    assert.equal(requests.length, callsBefore + 1);
+    assert.equal(requests.length, callsBefore + 2);
     assert.equal(store.turns(a.id).length, before);
     await call(`${path}/context`, "PUT", limits);
     mode = "burst";

@@ -65,9 +65,12 @@ ${sources[block]}`,
       if (block === "memory" && sectionState) excerpts.push(sectionState);
       if (block === "memory") excerpts.push(...summaries);
       if (block === "retrieval")
-        for (const ref of references)
-          excerpts.push(`첨부 파일 (참고 자료) · ${ref.project} / ${ref.path} · ${ref.start}–${ref.end}줄
+        for (const ref of references) {
+          if (ref.paused) continue;
+          const label = ref.kind === "knowledge" ? "지식 발췌" : "첨부 파일";
+          excerpts.push(`${label} (참고 자료) · ${ref.project} / ${ref.path} · ${ref.start}–${ref.end}줄
 ${ref.text}`);
+        }
       for (const text of excerpts) {
         const size = messageCost(text);
         if (estimatedInput + size <= budget) {

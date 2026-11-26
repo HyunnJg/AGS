@@ -225,16 +225,18 @@ export function createChatServer(
         throw new RequestError(409, "settings_changed");
       return json(store.promptSettings());
     }
-    if ((path === "/api/settings/section-memory" || path === "/api/settings/memory-update") && store) {
+    if (store && ["/api/settings/section-memory", "/api/settings/memory-update", "/api/settings/knowledge"].includes(path)) {
+      const knowledge = path.endsWith("/knowledge");
       const updating = path.endsWith("memory-update");
       if (req.method === "PUT") {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || !("enabled" in body) || typeof body.enabled !== "boolean")
           throw new RequestError(400, "invalid_setting");
-        if (updating) store.setUpdateMemoryEnabled(body.enabled);
+        if (knowledge) store.setKnowledgeEnabled(body.enabled);
+        else if (updating) store.setUpdateMemoryEnabled(body.enabled);
         else store.setMemoryEnabled(body.enabled);
       } else if (req.method !== "GET") return allow("GET, PUT");
-      return json({ enabled: updating ? store.updateMemoryEnabled() : store.memoryEnabled() });
+      return json({ enabled: knowledge ? store.knowledgeEnabled() : updating ? store.updateMemoryEnabled() : store.memoryEnabled() });
     }
     if (path === "/api/settings/runtime") {
       if (req.method !== "GET") return allow("GET");

@@ -17,6 +17,7 @@ export function AttachLines({
   path,
   page,
   reopen,
+  kind = "file",
 }: {
   token: string;
   session: Session;
@@ -24,6 +25,7 @@ export function AttachLines({
   path: string;
   page: FilePage;
   reopen: () => void;
+  kind?: FileReference["kind"];
 }) {
   const [first, setFirst] = useState(String(page.start)),
     [last, setLast] = useState(String(page.end));
@@ -58,6 +60,7 @@ export function AttachLines({
         end,
         version: page.version,
         session: session.id,
+        kind,
       });
       window.dispatchEvent(new CustomEvent(changed, { detail: session.id }));
       setNotice(`${start}–${end}줄을 첨부했습니다.`);
@@ -112,10 +115,15 @@ export function AttachLines({
           type="submit"
           disabled={busy || stale || !selected.trim() || selected.length > maxReferenceChars}
         >
-          현재 대화에 첨부
+          {kind === "knowledge" ? "지식 발췌 추가" : "현재 대화에 첨부"}
         </button>
       </form>
-      <small>‘{session.title}’에서 뺄 때까지 전송할 참고 자료로 사용합니다.</small>
+      <small>
+        ‘{session.title}’에{" "}
+        {kind === "knowledge"
+          ? "외부 지식 참조가 켜져 있을 때 사용할 발췌를 저장합니다."
+          : "뺄 때까지 사용할 참고 자료를 첨부합니다."}
+      </small>
       {selected.length > maxReferenceChars && <p>첨부 범위를 6,000자 이내로 줄여 주세요.</p>}
       {notice && <output>{notice}</output>}
       {error && <p role="alert">{error}</p>}
@@ -153,10 +161,12 @@ export function AttachedReferences({ token, session }: { token: string; session:
     };
     void load();
     window.addEventListener(changed, update);
+    window.addEventListener("ags-knowledge-setting", load);
     window.addEventListener("focus", load);
     return () => {
       pending?.abort();
       window.removeEventListener(changed, update);
+      window.removeEventListener("ags-knowledge-setting", load);
       window.removeEventListener("focus", load);
     };
   }, [route, session, token]);
@@ -179,6 +189,12 @@ export function AttachedReferences({ token, session }: { token: string; session:
               <strong>
                 {r.project} / {r.path} · {r.start}–{r.end}줄
               </strong>
+              {r.kind === "knowledge" && (
+                <small>
+                  지식 발췌 · 원본 버전 {r.version.slice(0, 8)}
+                  {r.paused ? " · 참조 꺼짐" : ""}
+                </small>
+              )}
               <button type="button" onClick={() => void remove(r.id)}>
                 첨부 빼기
               </button>

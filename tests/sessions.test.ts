@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -94,5 +95,54 @@ test("첨부 자료는 대화별로 복원되고 같은 요청을 재시도해�
     assert.equal(next.references(a.id).length, 7);
   } finally {
     next.close();
+  }
+});
+
+test("기존 파일 첨부를 유지하고 지식 참조 설정을 재시작 후에도 복원한다", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "ags-knowledge-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const path = join(folder, "sessions.sqlite");
+  let store = new SessionStore(path);
+  const session = store.create();
+  const project = store.addProject("전시");
+  const file = store.addReference(session.id, project, "이전.md", "v1", 1, 1, "파일");
+  store.close();
+  const old = new DatabaseSync(path);
+  old.exec("ALTER TABLE file_references DROP COLUMN kind; PRAGMA user_version=3");
+  old.close();
+  store = new SessionStore(path);
+  try {
+    assert.equal(store.references(session.id)[0]?.id, file);
+    assert.equal(store.references(session.id)[0]?.kind, "file");
+    assert.throws(
+      () => store.addReference(session.id, project, "이전.md", "v1", 1, 1, "파일", "knowledge"),
+      /reference_kind_conflict/,
+    );
+    store.addReference(session.id, project, "출처.md", "v2", 3, 3, "지식", "knowledge");
+    store.setKnowledgeEnabled(false);
+    assert.throws(
+      () => store.addReference(session.id, project, "출처.md", "v2", 4, 4, "지식", "knowledge"),
+      /knowledge_disabled/,
+    );
+  } finally {
+    store.close();
+  }
+  store = new SessionStore(path);
+  try {
+    assert.equal(store.memoryEnabled(), true);
+    assert.equal(store.knowledgeEnabled(), false);
+    assert.deepEqual(
+      store.references(session.id).map((r) => [r.kind, r.paused]),
+      [
+        ["file", false],
+        ["knowledge", true],
+      ],
+    );
+    store.setMemoryEnabled(false);
+    store.setKnowledgeEnabled(true);
+    assert.equal(store.references(session.id)[1]?.paused, false);
+    assert.equal(store.memoryEnabled(), false);
+  } finally {
+    store.close();
   }
 });

@@ -96,6 +96,12 @@ export function SectionMemorySetting({ token }: { token: string }) {
       />
       <MemoryToggle
         token={token}
+        path="/api/settings/knowledge"
+        label="외부 지식 참조"
+        detail="지식 안내도에서 고른 발췌를 대화에 포함합니다. 꺼 두면 기존 발췌를 보관하고 전송에서 제외합니다."
+      />
+      <MemoryToggle
+        token={token}
         path="/api/settings/memory-update"
         label="작업기억 갱신"
         detail="대화에서 구간 요약 초안을 만들고 검토한 내용을 작업 폴더에 저장할 수 있습니다."
@@ -135,6 +141,7 @@ function MemoryToggle({
     try {
       const data = await (await api(token, path, "PUT", { enabled: !enabled })).json();
       setEnabled(data.enabled);
+      if (path.endsWith("/knowledge")) window.dispatchEvent(new Event("ags-knowledge-setting"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "설정을 저장하지 못했습니다.");
     } finally {

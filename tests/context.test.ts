@@ -122,7 +122,7 @@ test("첨부 발췌는 예산을 넘으면 통째로 제외하고 수동 참고 
     null,
     defaultOrder,
     manual,
-    [{ id: "example", project: "자료", path: "doc.txt", start: 1, end: 1, text: "긴 문장".repeat(100) }],
+    [{ id: "example", kind: "file", version: "v1", paused: false, project: "자료", path: "doc.txt", start: 1, end: 1, text: "긴 문장".repeat(100) }],
   );
   assert.deepEqual(limited.messages, normal.messages);
   assert.deepEqual(limited.excluded, ["retrieval"]);
