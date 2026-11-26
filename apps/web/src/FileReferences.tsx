@@ -3,6 +3,7 @@ import {
   maxReferenceChars,
   type FilePage,
   type FileReference,
+  type KnowledgeSourceCheck,
   type Project,
 } from "../../../packages/contracts/src/workspace.ts";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
@@ -16,6 +17,7 @@ export function AttachLines({
   project,
   path,
   page,
+  rangeEnd,
   reopen,
   kind = "file",
 }: {
@@ -24,11 +26,12 @@ export function AttachLines({
   project: Project;
   path: string;
   page: FilePage;
+  rangeEnd?: number | undefined;
   reopen: () => void;
   kind?: FileReference["kind"];
 }) {
   const [first, setFirst] = useState(String(page.start)),
-    [last, setLast] = useState(String(page.end));
+    [last, setLast] = useState(String(Math.min(rangeEnd ?? page.end, page.end)));
   const [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
@@ -79,6 +82,11 @@ export function AttachLines({
   }
   return (
     <div className="attach-lines">
+      {rangeEnd !== undefined && rangeEnd > page.end && (
+        <small>
+          링크는 {rangeEnd}줄까지입니다. 현재 보이는 {page.end}줄까지 선택했습니다.
+        </small>
+      )}
       {page.clipped && <small>2,048자를 넘는 줄은 첨부 범위에서 빼 주세요.</small>}
       <form onSubmit={attach}>
         <label>
@@ -136,10 +144,56 @@ export function AttachLines({
   );
 }
 
+function KnowledgeVersion({ token, route }: { token: string; route: string }) {
+  const [request, setRequest] = useState({ route });
+  const [result, setResult] = useState<KnowledgeSourceCheck>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    api(token, request.route, "POST", undefined, controller.signal)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!controller.signal.aborted) setResult(data);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted)
+          setError(e instanceof Error ? e.message : "원본 확인 요청에 실패했습니다.");
+      });
+    return () => controller.abort();
+  }, [request, token]);
+  const busy = !result && !error;
+  const labels = {
+    current: "발췌 당시와 같은 버전",
+    changed: "원본 변경됨 · 대화에는 저장한 발췌를 사용합니다.",
+    unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
+  };
+  return (
+    <div>
+      <output>
+        {result
+          ? `${new Date(result.checkedAt).toLocaleTimeString()} 확인 · ${labels[result.status]}`
+          : error || "원본 확인 중…"}
+      </output>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setResult(undefined);
+          setError("");
+          setRequest({ route });
+        }}
+      >
+        원본 다시 확인
+      </button>
+    </div>
+  );
+}
+
 export function AttachedReferences({ token, session }: { token: string; session: string }) {
   const [refs, setRefs] = useState<FileReference[]>([]),
     [error, setError] = useState("");
   const route = `/api/sessions/${session}/references`;
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     let pending: AbortController | undefined;
     async function load() {
@@ -182,7 +236,11 @@ export function AttachedReferences({ token, session }: { token: string; session:
     <>
       {error && <p role="alert">{error}</p>}
       {refs.length > 0 && (
-        <details className="attached-references">
+        <details
+          className="attached-references"
+          open={expanded}
+          onToggle={(e) => setExpanded(e.currentTarget.open)}
+        >
           <summary>첨부 자료 {refs.length}개</summary>
           {refs.map((r) => (
             <div key={r.id}>
@@ -194,6 +252,9 @@ export function AttachedReferences({ token, session }: { token: string; session:
                   지식 발췌 · 원본 버전 {r.version.slice(0, 8)}
                   {r.paused ? " · 참조 꺼짐" : ""}
                 </small>
+              )}
+              {expanded && r.kind === "knowledge" && (
+                <KnowledgeVersion token={token} route={`${route}/${r.id}/check`} />
               )}
               <button type="button" onClick={() => void remove(r.id)}>
                 첨부 빼기

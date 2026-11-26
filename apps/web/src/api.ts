@@ -8,6 +8,7 @@ export class SettingsConflict extends Error {
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 const workspaceMessages: Record<string, string> = {
+  source_unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
   knowledge_disabled: "설정 → 토글형 모듈에서 외부 지식 참조를 켜면 지식 발췌를 추가할 수 있습니다.",
   reference_kind_conflict: "이 범위는 이미 다른 방식으로 첨부했습니다. 첨부 자료에서 뺀 뒤 다시 선택하세요.",
   checkpoint_too_long: "생성된 요약이 너무 깁니다. 다시 생성하세요.",
