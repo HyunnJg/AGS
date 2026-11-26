@@ -15,7 +15,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
-import { type Session, isPreset, type Preset } from "../../../packages/contracts/src/sessions.ts";
+import { type Session, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
 import { isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
@@ -63,7 +63,7 @@ async function readBody(req: IncomingMessage, limit = maxBodyBytes): Promise<unk
   return body;
 }
 
-type Provider = (message: string, signal: AbortSignal, preset?: Preset) => AsyncIterable<string>;
+type Provider = (message: string, signal: AbortSignal, preset?: string) => AsyncIterable<string>;
 
 export function createChatServer(
   token: string,
@@ -103,7 +103,7 @@ export function createChatServer(
     const pinned = summaries.filter((s) => refs.some((r) => r.path === s.path && r.version === s.version));
     const texts = pinned.map((s) => s.text).filter(Boolean);
     const assembled = assembleContext(
-      session.preset,
+      db.presetContent(session.preset),
       shared.prompt,
       session.provider === "anthropic" && limits.outputBudget === null ? { ...limits, outputBudget: defaultClaudeOutput } : limits,
       db.history(session.id, limits.turns),
@@ -223,6 +223,18 @@ export function createChatServer(
       if (!store.setDisplayRules(body.revision, body.rules as DisplayRule[]))
         throw new RequestError(409, "settings_changed");
       return json(store.displaySettings());
+    }
+    if (path === "/api/settings/presets" && store) {
+      if (req.method === "GET") return json(store.customPresets());
+      if (req.method !== "POST") return allow("GET, POST");
+      const body = await readBody(req);
+      if (!isPresetDraft(body)) throw new RequestError(400, "invalid_preset");
+      return json(store.addPreset(body.name.trim(), body.instructions));
+    }
+    const customId = path.startsWith("/api/settings/presets/") ? path.slice("/api/settings/presets/".length) : undefined;
+    if (store && isCustomPresetId(customId)) {
+      if (req.method !== "GET") return allow("GET");
+      return json(store.presetContent(customId));
     }
     if (path === "/api/settings/response-language" && store) {
       if (req.method === "GET") return json({ language: store.promptSettings().responseLanguage });
@@ -474,6 +486,7 @@ export function createChatServer(
       if (!body || typeof body !== "object" || !("preset" in body) || !isPreset(body.preset)) {
         throw new RequestError(400, "invalid_preset");
       }
+      if (isCustomPresetId(body.preset)) store.presetContent(body.preset);
       store.setPreset(session.id, body.preset);
       return json(store.get(session.id));
     }
@@ -564,7 +577,7 @@ export function createChatServer(
               context.outputBudget,
               capture,
             )
-          : provider(message, signal, session?.preset);
+          : provider(message, signal, isCustomPresetId(session?.preset) ? "사용자 프리셋" : session?.preset);
       for await (const text of reply) {
         signal.throwIfAborted();
         timer.refresh();

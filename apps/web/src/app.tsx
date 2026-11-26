@@ -7,7 +7,7 @@ import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { presets, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
+import { presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
 import {
   isModelSelection,
@@ -92,6 +92,7 @@ function Conversation({
   update,
   activity,
   favorites,
+  customPresets,
   displayRules,
   options,
   onRemoteActivity,
@@ -106,6 +107,7 @@ function Conversation({
   activity: (id: string, running: boolean) => void;
   visible: boolean;
   favorites: ModelSelection[];
+  customPresets: CustomPresetSummary[];
   displayRules: DisplayRule[];
   options: ProviderOption[];
   onReviewer: (id: string, open?: boolean) => void;
@@ -281,6 +283,12 @@ function Conversation({
                 {v}
               </option>
             ))}
+            {isCustomPresetId(session.preset) && !customPresets.some((item) => item.id === session.preset) && (
+              <option value={session.preset}>사용자 프리셋</option>
+            )}
+            {customPresets.length > 0 && <optgroup label="사용자 프리셋">
+              {customPresets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </optgroup>}
           </select>
         </label>
       </header>
@@ -387,6 +395,7 @@ function Workspace({ token }: { token: string }) {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [displayRules, setDisplayRules] = useState<DisplayRule[]>([]);
+  const [customPresets, setCustomPresets] = useState<CustomPresetSummary[]>([]);
   const [favorites, setFavorites] = useState<ModelSelection[]>([]);
   useEffect(() => {
     if (settings) return;
@@ -405,6 +414,7 @@ function Workspace({ token }: { token: string }) {
         }
       }
       void read<ProviderOption[]>("/api/providers", setOptions);
+      void read<CustomPresetSummary[]>("/api/settings/presets", setCustomPresets);
       void read<ModelSelection[]>("/api/settings/favorites", setFavorites);
       void read<{ rules: DisplayRule[] }>("/api/settings/display-rules", ({ rules }) => {
         setDisplayRules((prev) => JSON.stringify(prev) === JSON.stringify(rules) ? prev : rules);
@@ -567,6 +577,7 @@ function Workspace({ token }: { token: string }) {
             onRemoteActivity={onRemoteActivity}
             displayRules={displayRules}
             favorites={favorites}
+            customPresets={customPresets}
             options={options}
             update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
           />
