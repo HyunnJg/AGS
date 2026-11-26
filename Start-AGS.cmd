@@ -6,9 +6,15 @@ where node >nul 2>nul || (
   if /i not "%~1"=="--check" pause
   exit /b 1
 )
+if /i "%~1"=="export" goto backup
+if /i "%~1"=="restore" goto backup
 node scripts/open-windows.mjs %*
 if errorlevel 1 (
   if /i not "%~1"=="--check" pause
   exit /b 1
 )
 exit /b 0
+
+:backup
+node dist/scripts/state-backup.js %*
+exit /b %errorlevel%

@@ -38,6 +38,14 @@ jobs:
           $env:AGS_PORT = "0"
           $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-package-test"
           & "$package/Start-AGS.cmd" --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $backup = Join-Path $env:RUNNER_TEMP "AGS test.ags-backup"
+          & "$package/Start-AGS.cmd" export "$backup"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-restored"
+          & "$package/Start-AGS.cmd" restore "$backup" "$env:AGS_STATE_DIR"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$package/Start-AGS.cmd" --check
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'

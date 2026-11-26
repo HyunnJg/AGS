@@ -9,3 +9,4 @@ coverage/
 *.sqlite-*
 .workspace/
 .private/
+*.ags-backup
