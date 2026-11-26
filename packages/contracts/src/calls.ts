@@ -1,3 +1,4 @@
+import type { ContextBudget } from "./context.ts";
 import type { ModelSelection } from "./providers.ts";
 
 export const callKinds = {
@@ -18,6 +19,7 @@ export interface CallSummary extends ModelSelection {
   httpStatus: number | null;
 }
 export interface CallLog extends CallSummary {
+  contextBudget?: ContextBudget;
   request?: { messageCount: number; contentBytes: number; maxTokens: number | null };
   headers: Record<string, string>;
   body: string;

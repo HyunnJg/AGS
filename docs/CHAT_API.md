@@ -134,4 +134,6 @@ Anthropic은 워크스페이스 전용 키를 Bearer 헤더로 전송한다. `an
 
 공급자 채팅 요청을 시도한 호출의 상세와 JSON 내보내기에는 `request`가 포함된다. `messageCount`는 전송 메시지 수, `contentBytes`는 각 메시지 `content`의 UTF-8 바이트 수 합계, `maxTokens`는 OpenAI 직접 연결의 `max_completion_tokens` 또는 Gemini의 `generationConfig.maxOutputTokens`, 호환 공급자의 `max_tokens` 값이며 미지정 시 null이다. 로컬 mock·모델 목록 조회 및 이전 버전에서 저장한 기록에서는 이 필드를 생략한다.
 
+새 공급자 일반 채팅의 상세 및 내보내기에는 조립 당시의 `contextBudget`이 포함된다. `estimatedInput`, `inputCeiling`, `blockUsage`는 미리보기와 같은 의미이며 AGS의 추정치다. 입력 원문은 이 필드에 저장하지 않는다. 로컬 mock, 독립 검토, 구간 요약, 모델 목록 조회 및 이전 기록은 이 필드를 생략한다.
+
 인증된 `DELETE /api/call-logs`는 현재 저장된 호출 로그만 일괄 삭제하고 `{ deleted: 건수 }`를 반환한다. 빈 목록도 성공으로 처리한다. 진행 중인 호출은 시작 당시의 기록 설정에 따라 종료 시 저장된다.

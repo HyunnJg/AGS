@@ -10,6 +10,7 @@ import {
   defaultOrder,
   emptySources,
   type Block,
+  type ContextBudget,
   type SessionSources,
   type PromptSettings,
 } from "../../../packages/contracts/src/context.ts";
@@ -286,12 +287,18 @@ export class SessionStore {
   clearCallLogs() {
     return Number(this.db.prepare("DELETE FROM call_log").run().changes);
   }
-  startCall(kind: CallKind, selection: ModelSelection, session: string | null) {
+  startCall(kind: CallKind, selection: ModelSelection, session: string | null, budget?: ContextBudget) {
     try {
       if (!this.logsEnabled()) return;
     } catch {
       return;
     }
+    // Project only numeric accounting and block IDs. The assembled context also contains input text.
+    const contextBudget = budget && {
+      estimatedInput: budget.estimatedInput,
+      inputCeiling: budget.inputCeiling,
+      blockUsage: budget.blockUsage,
+    };
     const capture = new CallCapture(kind, selection, session, (log) => {
       const { request, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
       this.db
@@ -299,7 +306,7 @@ export class SessionStore {
         .run(
           log.id,
           JSON.stringify(summary),
-          JSON.stringify({ request, headers, body, bodyLimited, answer, answerLimited }),
+          JSON.stringify({ request, contextBudget, headers, body, bodyLimited, answer, answerLimited }),
         );
     });
     this.protectCall?.(capture);

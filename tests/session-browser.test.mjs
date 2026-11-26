@@ -861,6 +861,12 @@ test(
     const detail = page.getByRole("region", { name: "호출 상세" });
     await detail.getByText(/HTTP 200/).waitFor();
     await detail.getByText(new RegExp(`메시지 ${statePayload.length}개`)).waitFor();
+    await detail.getByText("전송 시 입력 구성").waitFor();
+    await detail.getByText("블록별 입력 예산", { exact: true }).click();
+    const loggedBudget = detail.getByRole("table", { name: "블록별 입력 예산" });
+    const memoryRow = loggedBudget.getByRole("row", { name: /장기기억/ });
+    assert.equal(await memoryRow.getByRole("cell").nth(1).innerText(),
+      String(restored.blockUsage.find((row) => row.block === "memory").includedMessages));
     await detail.locator("pre").filter({ hasText: "[DONE]" }).waitFor();
     assert.match(await detail.locator("pre").nth(0).innerText(), /text\/event-stream/);
     assert.equal(await detail.locator("pre").nth(2).innerText(), "복원 확인");
@@ -870,6 +876,11 @@ test(
       const data = JSON.parse(await readFile(await (await file).path(), "utf8"));
       const row = Array.isArray(data) ? data.find((item) => item.id === sample.id) : data;
       assert.equal(row.answer, "복원 확인");
+      assert.equal(row.contextBudget.estimatedInput, restored.estimatedInput);
+      assert.deepEqual(row.contextBudget.blockUsage, restored.blockUsage);
+      if (Array.isArray(data))
+        assert.ok(data.filter((item) => item.kind !== "chat" || item.provider === "mock")
+          .every((item) => !("contextBudget" in item)));
       assert.equal(row.request.contentBytes, statePayload.reduce((n, m) => n + Buffer.byteLength(m.content), 0));
       assert.ok(!JSON.stringify(row.request).includes("섹션 복원 검증"));
       assert.ok(row.body.includes("[DONE]"));
