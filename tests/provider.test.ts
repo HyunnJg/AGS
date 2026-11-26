@@ -207,6 +207,20 @@ test(
     assert.equal((await call(presetsPath, "POST", { ...boundary, instructions: `${boundary.instructions}x` })).status, 400);
     assert.equal((await call(path, "PATCH", {preset: "custom-00000000-0000-0000-0000-000000000000"})).status, 404);
     assert.equal((await call(path, "PATCH", {preset: registered.id})).status, 200);
+    const archivePath = `${presetsPath}/${registered.id}/archive`;
+    assert.equal((await call(archivePath, "PUT", { archived: "true" })).status, 400);
+    assert.equal((await call(`${presetsPath}/custom-00000000-0000-0000-0000-000000000000/archive`, "PUT", { archived: true })).status, 404);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      assert.deepEqual(await (await call(archivePath, "PUT", { archived: true })).json(), { archived: true });
+    }
+    assert.deepEqual(await (await call(presetsPath, "POST", definition)).json(), { ...registered, archived: true });
+    assert.deepEqual(await (await call(`${presetsPath}/${registered.id}`, "GET")).json(), registered);
+    const activeList = await (await call(presetsPath, "GET")).json();
+    assert.deepEqual(activeList.map((item: {name: string}) => item.name), [boundary.name]);
+    const allPresets = await (await call(`${presetsPath}?includeArchived=1`, "GET")).json();
+    assert.deepEqual(allPresets.find((item: {id: string}) => item.id === registered.id), {
+      id: registered.id, name: definition.name, archived: true,
+    });
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
@@ -228,6 +242,9 @@ test(
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);
+    assert.equal((await call(archivePath, "PUT", { archived: false })).status, 200);
+    const restored = await (await call(presetsPath, "GET")).json();
+    assert.deepEqual(restored.find((item: {id: string}) => item.id === registered.id), { id: registered.id, name: definition.name });
     checkSummary();
     assert.equal((await call("/api/settings/knowledge", "PUT", { enabled: true })).status, 200);
     const withKnowledge = await (await call(`${path}/context-preview`, "POST", { message: "방법 확인", limits })).json();

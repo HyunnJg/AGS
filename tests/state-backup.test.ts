@@ -39,6 +39,7 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
   db.append("turn-1", "초안 내용");
   const profile = db.addPreset("실험", "Compare evidence.");
   db.setPreset(session.id, profile.id);
+  db.setPresetArchived(profile.id, true);
   assert.ok(db.setResponseLanguage("en", "auto"));
   db.setFavorite({ provider: "openai", model: "fixture-model" }, true);
   assert.notEqual(run("export", file).status, 0);
@@ -73,6 +74,8 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
     const definition = reopened.presetContent(profile.id);
     assert.ok(typeof definition === "object");
     assert.deepEqual({...definition}, profile);
+    assert.deepEqual(reopened.customPresets(), []);
+    assert.deepEqual(reopened.customPresets(true), [{ id: profile.id, name: profile.name, archived: true }]);
     assert.equal(reopened.promptSettings().responseLanguage, "en");
     assert.equal(reopened.project(project)?.writeGrant, null);
     assert.equal(reopened.get(session.id)?.sectionId, sectionId);
@@ -97,12 +100,16 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
   const bad = join(dir, "bad"),
     incomplete = join(dir, "미완성");
   const payload = raw.slice(0, raw.lastIndexOf('["sha256"'));
-  const prePresets = payload.replace(`["table","custom_presets",["id","name","instructions"]]\n["row",1,"${profile.id}","실험","Compare evidence."]\n`, "").replaceAll(profile.id, "general");
+  const currentRows = `["table","custom_presets",["id","name","instructions","archived"]]\n["row",1,"${profile.id}","실험","Compare evidence.",1]\n`;
+  const legacyRows = `["table","custom_presets",["id","name","instructions"]]\n["row",1,"${profile.id}","실험","Compare evidence."]\n`;
+  assert.ok(payload.includes(currentRows));
+  const v7 = payload.replace(currentRows, legacyRows).replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,7]');
+  const prePresets = payload.replace(currentRows, "").replaceAll(profile.id, "general");
   const v5 = prePresets.replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,5]')
     .replace('["table","shared_prompt",["id","prompt","responseLanguage"]]\n["row",1,1,"","en"]',
       '["table","shared_prompt",["id","prompt"]]\n["row",1,1,"기존 공용 지침"]');
   const v6 = prePresets.replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,6]');
-  for (const [version, contents] of [[5, v5], [6, v6]] as const) {
+  for (const [version, contents] of [[5, v5], [6, v6], [7, v7]] as const) {
     const legacyFile = join(dir, `v${version}.ags-backup`), legacyDir = join(dir, `v${version}-restored`);
     const digest = createHash("sha256").update(contents).digest("hex");
     writeFileSync(legacyFile, `${contents}${JSON.stringify(["sha256", digest])}\n`);
@@ -110,8 +117,8 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
     assert.equal(legacyRestore.status, 0, legacyRestore.stderr);
     const legacy = new SessionStore(join(legacyDir, "sessions.sqlite"));
     try {
-      assert.equal(legacy.get(session.id)?.preset, "general");
-      assert.deepEqual(legacy.customPresets(), []);
+      assert.equal(legacy.get(session.id)?.preset, version === 7 ? profile.id : "general");
+      assert.deepEqual(legacy.customPresets(), version === 7 ? [{ id: profile.id, name: profile.name }] : []);
       assert.equal(legacy.prompt(), version === 5 ? "기존 공용 지침" : "");
       assert.equal(legacy.promptSettings().responseLanguage, version === 5 ? "auto" : "en");
       assert.equal(legacy.turns(session.id)[0]?.reply, "초안 내용");

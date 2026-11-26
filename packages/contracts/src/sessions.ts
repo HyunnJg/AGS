@@ -7,6 +7,7 @@ export type Preset = BuiltinPreset | CustomPresetId;
 export interface CustomPresetSummary {
   id: CustomPresetId;
   name: string;
+  archived?: boolean;
 }
 export interface CustomPreset extends CustomPresetSummary {
   instructions: string;

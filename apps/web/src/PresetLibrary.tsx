@@ -46,18 +46,42 @@ function PresetBody({ token, id }: { token: string; id: string }) {
   return data ? <pre>{data.instructions}</pre> : <small>본문을 읽는 중…</small>;
 }
 
-function PresetRow({ token, preset }: { token: string; preset: CustomPresetSummary }) {
+function PresetRow({ token, preset, onChange }: {
+  token: string;
+  preset: CustomPresetSummary;
+  onChange: () => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function toggleArchive() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(token, `${presetsPath}/${preset.id}/archive`, "PUT", { archived: !preset.archived });
+      onChange();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "보관 상태를 변경하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>{preset.name}</summary>
-      {open && <PresetBody token={token} id={preset.id} />}
+      <summary>{preset.name}{preset.archived && " (보관됨)"}</summary>
+      {open && <>
+        <PresetBody token={token} id={preset.id} />
+        <button type="button" disabled={busy} onClick={() => void toggleArchive()}>
+          {preset.archived ? "선택 목록에 복원" : "프리셋 보관"}
+        </button>
+        {error && <div role="alert">{error}</div>}
+      </>}
     </details>
   );
 }
 
 export function PresetLibrary({ token }: { token: string }) {
-  const list = usePresetRead<CustomPresetSummary[]>(token, presetsPath);
+  const list = usePresetRead<CustomPresetSummary[]>(token, `${presetsPath}?includeArchived=1`);
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
@@ -89,9 +113,11 @@ export function PresetLibrary({ token }: { token: string }) {
   async function save() {
     setBusy(true);
     try {
-      await api(token, presetsPath, "POST", { name, instructions });
+      const saved: CustomPreset = await (await api(token, presetsPath, "POST", { name, instructions })).json();
       list.reload();
-      setMessage(`‘${name.trim()}’ 등록 완료 · 대화 상단의 프리셋에서 선택하세요.`);
+      setMessage(saved.archived
+        ? `‘${saved.name}’은 보관 중입니다. 아래 목록에서 복원할 수 있습니다.`
+        : `‘${saved.name}’ 등록 완료 · 대화 상단의 프리셋에서 선택하세요.`);
       setName("");
       setInstructions("");
     } catch (error) {
@@ -157,7 +183,7 @@ export function PresetLibrary({ token }: { token: string }) {
         {!list.data && !list.error && <small>목록을 읽는 중…</small>}
         {list.data?.length === 0 && <small>등록된 프리셋이 없습니다.</small>}
         {list.data?.map((preset) => (
-          <PresetRow key={preset.id} token={token} preset={preset} />
+          <PresetRow key={preset.id} token={token} preset={preset} onChange={list.reload} />
         ))}
       </section>
     </>
