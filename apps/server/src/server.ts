@@ -318,7 +318,7 @@ export function createChatServer(
             throw new RequestError(400, "invalid_model");
         }
         const preferred = providers.options.find(o =>
-          (o.id === "openrouter" || o.id === "openai") && o.enabled &&
+          (o.id === "openrouter" || o.id === "openai" || o.id === "gemini") && o.enabled &&
           isModelSelection({ provider: o.id, model: o.defaultModel }),
         );
         const selection = preferred && { provider: preferred.id, model: preferred.defaultModel };

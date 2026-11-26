@@ -79,7 +79,7 @@ export class CallCapture {
     return text
       .replace(/(Bearer\s+)[^\s"',}]+/gi, `$1${hidden}`)
       .replace(
-        /("(?:x-api-key|api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|proxy-authorization|password|secret|set-cookie|cookie)"\s*:\s*")(?:\\.|[^"\\\r\n])*/gi,
+        /("(?:x-api-key|x-goog-api-key|api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|proxy-authorization|password|secret|set-cookie|cookie)"\s*:\s*")(?:\\.|[^"\\\r\n])*/gi,
         `$1${hidden}`,
       );
   }

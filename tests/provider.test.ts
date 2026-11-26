@@ -499,12 +499,13 @@ test("OpenAI 직접 연결은 고정 주소·전용 키·출력 한도를 사용
   assert.equal(calls, 0);
 });
 
-test("새 대화의 기본 공급자는 설정된 OpenRouter, OpenAI, mock 순서다", async (t) => {
+test("새 대화의 기본 공급자는 설정된 OpenRouter, OpenAI, Gemini, mock 순서다", async (t) => {
   const token = "x".repeat(32);
   const env = { AGS_OPENAI_API_KEY: "fixture", AGS_OPENAI_MODEL: "direct" };
   for (const [settings, expected] of [
     [{ ...env, AGS_OPENROUTER_API_KEY: "fixture-2", AGS_OPENROUTER_MODEL: "router" }, ["openrouter", "router"]],
-    [env, ["openai", "direct"]],
+    [{...env, AGS_GEMINI_API_KEY:"fixture-3", AGS_GEMINI_MODEL:"google"}, ["openai", "direct"]],
+    [{AGS_GEMINI_API_KEY:"fixture-3", AGS_GEMINI_MODEL:"google"}, ["gemini", "google"]],
     [{ ...env, AGS_OPENAI_API_KEY: "" }, ["mock", ""]],
   ] as const) {
     const store = new SessionStore(":memory:");
