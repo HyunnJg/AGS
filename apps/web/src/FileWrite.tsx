@@ -27,6 +27,7 @@ export function FileWrite({
     [error, setError] = useState("");
   const [baseVersion, setBaseVersion] = useState(version);
   const [conflicted, setConflicted] = useState(false);
+  const [savingCopy, setSavingCopy] = useState(false);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -34,9 +35,24 @@ export function FileWrite({
       active.current = false;
     };
   }, []);
-  const creating = version === null;
-  const target = creating ? [path, name].filter(Boolean).join("/") : path;
+  const creating = version === null || savingCopy;
+  const parts = path.split("/");
+  const originalName = parts.at(-1) ?? "";
+  const directory = savingCopy ? parts.slice(0, -1).join("/") : path;
+  const target = creating ? [directory, name].filter(Boolean).join("/") : path;
+  const invalidCopyName = savingCopy && (/[/\\]/.test(name) || name.toLowerCase() === originalName.toLowerCase());
+  const invalidName = creating && (!name.trim() || invalidCopyName);
   const route = `/api/projects/${project.id}`;
+  function beginCopy() {
+    const dot = originalName.lastIndexOf(".");
+    const stem = dot > 0 ? originalName.slice(0, dot) : originalName;
+    const ext = dot > 0 ? originalName.slice(dot) : "";
+    setName(`${stem}-초안${ext}`);
+    setSavingCopy(true);
+    setPreview(undefined);
+    setConflicted(false);
+    setError("");
+  }
   function fail(e: unknown) {
     if (active.current) {
       setError(e instanceof Error ? e.message : "파일을 저장하지 못했습니다.");
@@ -107,7 +123,7 @@ export function FileWrite({
               })
             ).json()
           ).version
-        : baseVersion;
+        : creating ? null : baseVersion;
       const proposal = await (
         await api(token, `${route}/propose`, "POST", {
           path: target,
@@ -141,6 +157,7 @@ export function FileWrite({
       if (active.current) {
         setOpen(false);
         setPreview(undefined);
+        setSavingCopy(false);
         saved(preview.path);
       }
     } catch (e) {
@@ -187,6 +204,7 @@ export function FileWrite({
                 <label>
                   새 파일 이름
                   <input value={name} onChange={(e) => setName(e.target.value)} />
+                  {savingCopy && <small>같은 폴더에 저장할 새 파일 이름을 입력하세요.</small>}
                 </label>
               )}
               {session && (
@@ -203,10 +221,15 @@ export function FileWrite({
                   onChange={(e) => setText(e.target.value)}
                 />
               </label>
-              <button type="button" disabled={creating && !name.trim()} onClick={() => void compare()}>
+              <button type="button" disabled={invalidName} onClick={() => void compare()}>
                 변경 비교
               </button>
             </>
+          )}
+          {!creating && (
+            <button type="button" onClick={beginCopy}>
+              초안을 다른 이름으로 저장
+            </button>
           )}
           {conflicted && !creating && (
             <button type="button" onClick={() => void compare(true)}>
@@ -217,6 +240,7 @@ export function FileWrite({
             type="button"
             onClick={() => {
               setConflicted(false);
+              setSavingCopy(false);
               setBaseVersion(version);
               setOpen(false);
               setPreview(undefined);

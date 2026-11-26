@@ -602,6 +602,14 @@ test(
     await panel.getByRole("button", { name: "새 파일", exact: true }).click();
     await panel.getByLabel("새 파일 이름").fill("result.md");
     await panel.getByLabel("수정안", { exact: true }).fill("승인할 결과");
+    await writeFile(join(example, "notes", "handoff.md"), "외부 편집기가 작성한 인계 문서");
+    await panel.getByRole("button", { name: "폴더 목록 새로고침" }).click();
+    await panel.getByRole("button", { name: "handoff.md", exact: true }).waitFor();
+    await rm(join(example, "notes", "handoff.md"));
+    await panel.getByRole("button", { name: "폴더 목록 새로고침" }).click();
+    await panel.getByRole("button", { name: "handoff.md", exact: true }).waitFor({ state: "detached" });
+    assert.equal(await panel.getByLabel("새 파일 이름").inputValue(), "result.md");
+    assert.equal(await panel.getByLabel("수정안", { exact: true }).inputValue(), "승인할 결과");
     await panel.getByRole("button", { name: "변경 비교" }).click();
     await panel.getByRole("button", { name: "승인하고 저장" }).waitFor();
     await assert.rejects(readFile(join(example, "notes", "result.md")), {
@@ -611,7 +619,7 @@ test(
     await panel.getByText("저장했습니다.", { exact: true }).waitFor();
     assert.equal(await readFile(join(example, "notes", "result.md"), "utf8"), "승인할 결과");
     await panel.getByRole("button", { name: "파일 수정", exact: true }).click();
-    await panel.getByLabel("수정안", { exact: true }).fill("저장되지 않을 결과");
+    await panel.getByLabel("수정안", { exact: true }).fill("AGS에서 작성한 초안");
     await panel.getByRole("button", { name: "변경 비교" }).click();
     await panel.getByRole("button", { name: "승인하고 저장" }).waitFor();
     await writeFile(join(example, "notes", "result.md"), "외부 변경");
@@ -620,8 +628,31 @@ test(
     assert.equal(await readFile(join(example, "notes", "result.md"), "utf8"), "외부 변경");
     await panel.getByRole("button", { name: "최신 원본과 다시 비교" }).click();
     await panel.locator(".removed").filter({ hasText: "외부 변경" }).waitFor();
-    await panel.locator(".added").filter({ hasText: "저장되지 않을 결과" }).waitFor();
-    await panel.getByRole("button", { name: "취소", exact: true }).click();
+    await panel.locator(".added").filter({ hasText: "AGS에서 작성한 초안" }).waitFor();
+    await panel.getByRole("button", { name: "초안을 다른 이름으로 저장" }).click();
+    const copyName = panel.getByLabel("새 파일 이름");
+    assert.equal(await copyName.inputValue(), "result-초안.md");
+    assert.equal(await panel.getByLabel("수정안", { exact: true }).inputValue(), "AGS에서 작성한 초안");
+    for (const invalid of ["result.md", "../moved.md"]) {
+      await copyName.fill(invalid);
+      assert.ok(await panel.getByRole("button", { name: "변경 비교" }).isDisabled());
+    }
+    await copyName.fill("result-초안.md");
+    await panel.getByRole("button", { name: "변경 비교" }).click();
+    await panel.getByText("notes/result-초안.md · 변경 미리보기").waitFor();
+    const occupied = join(example, "notes", "result-초안.md");
+    await assert.rejects(readFile(occupied), { code: "ENOENT" });
+    await writeFile(occupied, "다른 편집기가 먼저 저장");
+    await panel.getByRole("button", { name: "승인하고 저장" }).click();
+    await panel.getByText(/원본 또는 폴더가 변경됐습니다/).waitFor();
+    await panel.getByRole("button", { name: "수정안 편집" }).click();
+    await copyName.fill("result-검토.md");
+    await panel.getByRole("button", { name: "변경 비교" }).click();
+    await panel.getByText("notes/result-검토.md · 변경 미리보기").waitFor();
+    await panel.getByRole("button", { name: "승인하고 저장" }).click();
+    await panel.getByText("저장했습니다.", { exact: true }).waitFor();
+    assert.equal(await readFile(join(example, "notes", "result-검토.md"), "utf8"), "AGS에서 작성한 초안");
+    assert.equal(await readFile(occupied, "utf8"), "다른 편집기가 먼저 저장");
     assert.equal(await readFile(join(example, "notes", "result.md"), "utf8"), "외부 변경");
     const writes = await (await page.request.get(`${projectPath}/activity`, { headers })).json();
     assert.ok(writes.some((r) => r.action === "create" && r.path === "notes/result.md" && !r.error));
