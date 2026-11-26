@@ -19,6 +19,8 @@ import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
 import type { Preset, Session, Turn } from "../../../packages/contracts/src/sessions.ts";
 
+export const sessionSchemaVersion = 5;
+
 const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
   LEFT JOIN projects ON sections.projectId=projects.id`;
@@ -131,6 +133,8 @@ export class SessionStore {
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 4) {
         this.db.exec("ALTER TABLE reviews ADD COLUMN selectionKey TEXT; PRAGMA user_version=5");
       }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
+        throw new Error("unsupported_session_schema");
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.close();

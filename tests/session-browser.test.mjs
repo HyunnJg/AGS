@@ -391,7 +391,8 @@ test(
     await writeFile(join(folder, "tags.txt"), "TokenLookup");
     const openWorkspace = () => page.getByRole("button", { name: "프로젝트 · 파일" }).click();
     await openWorkspace();
-    await page.getByLabel("프로젝트 이름").fill("역사 자료");
+    const projectName = `역사 자료 ${"긴이름".repeat(25)}`;
+    await page.getByLabel("프로젝트 이름").fill(projectName);
     await page.getByRole("button", { name: "프로젝트 만들기" }).click();
     await page.getByText("새 섹션", { exact: true }).click();
     await page.getByLabel("섹션 이름").fill("사료 검토");
@@ -427,7 +428,7 @@ test(
     await page.getByText("83–83 / 83줄").waitFor();
     await page.getByRole("button", { name: "섹션에서 새 대화" }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
-    await page.getByText("역사 자료 / 사료 검토", { exact: true }).waitFor();
+    await page.getByText(`${projectName} / 사료 검토`, { exact: true }).waitFor();
     await page.getByLabel("메시지").fill("연표 확인");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("[mock] 수신한 메시지: 연표 확인", { exact: true }).waitFor();
@@ -446,11 +447,19 @@ test(
     const projectPath = `${base}/api/projects/${projectId}`;
     const headers = { authorization: `Bearer ${token}` };
     // Resize the open mobile dialog and edit a chat draft with the desktop panel still open.
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1010, height: 800 });
     await page.waitForFunction(() =>
       document.querySelector("#project-workspace")?.matches("[open]:not(:modal)"),
     );
     const panel = page.getByRole("dialog", { name: "프로젝트 · 파일" });
+    async function assertSelectorsFit() {
+      const box = await panel.boundingBox();
+      for (const label of ["프로젝트 선택", "섹션 선택"]) {
+        const select = await panel.getByLabel(label).boundingBox();
+        assert.ok(box && select && select.x >= box.x && select.x + select.width <= box.x + box.width + 1);
+      }
+    }
+    await assertSelectorsFit();
     const chat = page.getByLabel("메시지");
     await panel.getByRole("button", { name: "INDEX.md", exact: true }).click();
     await panel.getByText("1–80 / 83줄").waitFor();
@@ -529,10 +538,13 @@ test(
     await openWorkspace();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => document.querySelector("#project-workspace")?.matches(":modal"));
+    await assertSelectorsFit();
     // Switch to the packaged example and complete the guide → source → compare → approve loop.
     const example = await mkdtemp(join(tmpdir(), "ags-p2-demo-"));
     t.after(() => rm(example, { recursive: true, force: true }));
     await cp("examples/P2-workspace", example, { recursive: true });
+    const paragraphs = Array.from({length: 120}, (_, i) => `전시 안내 ${i + 1}`);
+    await writeFile(join(example, "notes", "intro.md"), paragraphs.join("\n"));
     await page.getByText("연결 폴더 변경", { exact: true }).click();
     await page.getByLabel("작업 폴더 절대 경로").fill(example);
     await page.getByLabel("승인형 저장 허용").check();
@@ -591,13 +603,20 @@ test(
     await panel.getByRole("button", { name: "현재 대화의 마지막 답변 가져오기" }).click();
     await page.waitForFunction(() => document.querySelector(".file-write textarea")?.value.includes("옆에서 자료 확인"));
     const before = await readFile(join(example, "notes", "intro.md"), "utf8");
-    await panel.getByLabel("수정안", { exact: true }).fill("# 확정 안내\n\n토요일에 문을 엽니다.\n");
+    paragraphs[2] = "개관 안내\n토요일에 문을 엽니다.";
+    paragraphs[109] = "폐관 안내";
+    const revised = paragraphs.join("\n");
+    await panel.getByLabel("수정안", { exact: true }).fill(revised);
     await panel.getByRole("button", { name: "변경 비교" }).click();
-    await panel.locator(".added").filter({ hasText: "토요일" }).waitFor();
+    const diff = panel.locator(".file-diff");
+    await diff.getByRole("region", {name:"원본 3줄 · 수정안 3–4줄"}).getByText(/토요일/).waitFor();
+    await diff.getByText("중간 106줄 동일").waitFor();
+    await diff.getByRole("region", {name:"원본 110줄 · 수정안 111줄"}).getByText(/폐관 안내/).waitFor();
+    assert.ok(!(await diff.innerText()).includes("전시 안내 60"));
     assert.equal(await readFile(join(example, "notes", "intro.md"), "utf8"), before);
     await panel.getByRole("button", { name: "승인하고 저장" }).click();
     await panel.getByText("저장했습니다 · notes/intro.md", { exact: true }).waitFor();
-    assert.match(await readFile(join(example, "notes", "intro.md"), "utf8"), /토요일/);
+    assert.equal(await readFile(join(example, "notes", "intro.md"), "utf8"), revised);
     await panel.getByRole("button", { name: "상위 폴더" }).click();
     await panel.getByRole("button", { name: "새 파일", exact: true }).click();
     await panel.getByLabel("새 파일 이름").fill("result.md");

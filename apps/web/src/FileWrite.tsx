@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, WritePreview } from "../../../packages/contracts/src/workspace.ts";
+import { FileDiff } from "./FileDiff.tsx";
 import { api, WriteConflict } from "./api.ts";
 
 export function FileWrite({
@@ -178,13 +179,7 @@ export function FileWrite({
           {preview ? (
             <>
               <legend>{preview.path} · 변경 미리보기</legend>
-              <small>{preview.action === "create" ? "새 파일" : `변경 시작 · ${preview.first}줄`}</small>
-              {!!preview.removed.length && (
-                <pre className="removed">{preview.removed.map((l) => `− ${l}`).join("\n")}</pre>
-              )}
-              {!!preview.added.length && (
-                <pre className="added">{preview.added.map((l) => `+ ${l}`).join("\n")}</pre>
-              )}
+              <FileDiff preview={preview} />
               <button
                 type="button"
                 onClick={() => {

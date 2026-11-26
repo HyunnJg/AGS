@@ -1,6 +1,5 @@
 @echo off
 setlocal
-cd /d "%~dp0"
 where node >nul 2>nul || (
   echo Install Node.js 24.22.3 or later in the 24.x line, then run Start-AGS again.
   if /i not "%~1"=="--check" pause
@@ -8,6 +7,7 @@ where node >nul 2>nul || (
 )
 if /i "%~1"=="export" goto backup
 if /i "%~1"=="restore" goto backup
+cd /d "%~dp0"
 node scripts/open-windows.mjs %*
 if errorlevel 1 (
   if /i not "%~1"=="--check" pause
@@ -16,5 +16,5 @@ if errorlevel 1 (
 exit /b 0
 
 :backup
-node dist/scripts/state-backup.js %*
+node "%~dp0dist\scripts\state-backup.js" %*
 exit /b %errorlevel%

@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { SessionStore } from "../apps/server/src/sessions.ts";
+import { SessionStore, sessionSchemaVersion } from "../apps/server/src/sessions.ts";
 import { isConnectionId, isModelSelection } from "../packages/contracts/src/providers.ts";
 import { customEndpoint, officialBaseUrls } from "../packages/providers/src/compatible.ts";
 
@@ -69,7 +69,7 @@ function exportState(source: string, destination: string) {
   try {
     db.exec("BEGIN");
     const layout = tables(db);
-    if (schema(db) !== 5)
+    if (schema(db) !== sessionSchemaVersion)
       throw new BackupError("DB 버전을 확인하세요. 현재 AGS에서 작업실을 열고 종료한 뒤 다시 시도하세요.");
     if (
       !layout.has("sessions") ||

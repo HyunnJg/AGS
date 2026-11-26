@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Connections } from "../apps/server/src/connections.ts";
-import { SessionStore } from "../apps/server/src/sessions.ts";
+import { SessionStore, sessionSchemaVersion } from "../apps/server/src/sessions.ts";
 
 test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설정·원본 사본을 복원한다", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ags-backup-"));
@@ -94,8 +94,8 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
   for (const damaged of [
     raw.replace("초안 내용", "다른 내용"),
     payload,
-    orphan + JSON.stringify(["sha256", createHash("sha256").update(orphan).digest("hex")]) + "\n",
-    raw.replace('["AGS-private-state",1,5]', '["AGS-private-state",1,999]'),
+    `${orphan + JSON.stringify(["sha256", createHash("sha256").update(orphan).digest("hex")])}\n`,
+    raw.replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,999]'),
     raw.replace('["AGS-private-state",1,', '["AGS-private-state",99,'),
   ]) {
     writeFileSync(bad, damaged);
