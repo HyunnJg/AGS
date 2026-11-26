@@ -12,7 +12,7 @@ import {
 } from "../../../packages/contracts/src/context.ts";
 import type { Preset } from "../../../packages/contracts/src/sessions.ts";
 
-function cost(text: string) {
+export function messageCost(text: string) {
   return Buffer.byteLength(text, "utf8") + 8;
 }
 
@@ -28,10 +28,11 @@ export function assembleContext(
   sources: SessionSources = emptySources,
   references: FileReference[] = [],
   sectionState = "",
+  summaries: string[] = [],
 ): ContextPreview {
   const system: Message = { role: "system", content: systemText(prompt, preset) };
   const request: Message = { role: "user", content: draft };
-  let estimatedInput = cost(system.content) + cost(request.content);
+  let estimatedInput = messageCost(system.content) + messageCost(request.content);
   const windowInput = modelWindow === null ? Infinity : modelWindow - (limits.outputBudget ?? 0);
   const budget = Math.min(limits.inputBudget ?? Infinity, windowInput);
   const content: Record<Block, Message[]> = { memory: [], history: [], retrieval: [], input: [request] };
@@ -45,7 +46,7 @@ export function assembleContext(
         const previous = history[start - 2],
           reply = history[start - 1];
         if (!previous || !reply) break;
-        const size = cost(previous.content) + cost(reply.content);
+        const size = messageCost(previous.content) + messageCost(reply.content);
         if (estimatedInput + size > budget) {
           excluded.push(block);
           break;
@@ -62,12 +63,13 @@ ${sources[block]}`,
           ]
         : [];
       if (block === "memory" && sectionState) excerpts.push(sectionState);
+      if (block === "memory") excerpts.push(...summaries);
       if (block === "retrieval")
         for (const ref of references)
           excerpts.push(`첨부 파일 (참고 자료) · ${ref.project} / ${ref.path} · ${ref.start}–${ref.end}줄
 ${ref.text}`);
       for (const text of excerpts) {
-        const size = cost(text);
+        const size = messageCost(text);
         if (estimatedInput + size <= budget) {
           content[block].push({ role: "user", content: text });
           estimatedInput += size;

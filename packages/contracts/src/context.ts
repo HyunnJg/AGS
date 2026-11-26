@@ -44,8 +44,28 @@ export interface Message {
   role: "system" | "user" | "assistant";
   content: string;
 }
-export const staleStateMessage = "섹션 상태 파일이 바뀌었거나 열 수 없어 이번 입력에서 제외했습니다. 프로젝트에서 원본을 연 뒤 다시 지정하세요.";
+export const staleStateMessage =
+  "섹션 상태 파일이 바뀌었거나 열 수 없어 이번 입력에서 제외했습니다. 프로젝트에서 원본을 연 뒤 다시 지정하세요.";
+export interface MemoryUse {
+  enabled: boolean;
+  state: boolean;
+  summaries: number;
+  stale: number;
+  omitted: number;
+}
+export function memoryUseLabel(use: MemoryUse) {
+  if (!use.enabled) return "섹션 기억 참조 꺼짐";
+  return [
+    use.state && "현재 상태 포함",
+    use.summaries > 0 && `구간 요약 ${use.summaries}건 포함`,
+    use.stale > 0 && `원본 확인 필요 ${use.stale}건 제외`,
+    use.omitted > 0 && `입력 예산으로 ${use.omitted}건 제외`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 export interface ContextPreview {
+  memoryUse?: MemoryUse;
   stateStale?: boolean;
   messages: Message[];
   blocks: ("system" | Block)[];
