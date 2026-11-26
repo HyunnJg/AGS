@@ -8,6 +8,7 @@ const labels = {
   search: "본문 검색",
   write: "파일 수정",
   create: "파일 생성",
+  verify: "지식 원본 확인",
   attach: "대화에 첨부",
 };
 export function WorkspaceActivity({ token, project }: { token: string; project: string }) {

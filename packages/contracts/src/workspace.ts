@@ -42,7 +42,7 @@ export interface WorkspaceSearch {
   limited: boolean;
 }
 
-export type FileAction = "entries" | "file" | "search" | "attach" | "write" | "create";
+export type FileAction = "entries" | "file" | "search" | "attach" | "write" | "create" | "verify";
 export interface FileActivity {
   backup: string|null;
   id: number;
@@ -52,6 +52,11 @@ export interface FileActivity {
   start: number | null;
   end: number | null;
   error: string | null;
+}
+
+export interface KnowledgeSourceCheck {
+  status: "current" | "changed" | "unavailable";
+  checkedAt: number;
 }
 
 export interface FileReference {

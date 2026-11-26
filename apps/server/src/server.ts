@@ -2,6 +2,7 @@ import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
 import { workspaceApi } from "./workspace-api.ts";
+import { checkKnowledgeSource } from "./knowledge-source.ts";
 import { WorkspaceError } from "./workspace-files.ts";
 import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { isBlockOrder, maxSourceLength } from "../../../packages/contracts/src/context.ts";
@@ -283,11 +284,16 @@ export function createChatServer(
       }
       return allow("GET, POST");
     }
-    const references = /^\/api\/sessions\/([a-f0-9-]{36})\/references(?:\/([a-f0-9-]{36}))?$/.exec(path);
+    const references =
+      /^\/api\/sessions\/([a-f0-9-]{36})\/references(?:\/([a-f0-9-]{36})(\/check)?)?$/.exec(path);
     if (references && store) {
       const sessionId = references[1] as string;
       if (!store.get(sessionId)) throw new RequestError(404, "unknown_session");
       if (!references[2]) return req.method === "GET" ? json(store.references(sessionId)) : allow("GET");
+      if (references[3]) {
+        if (req.method !== "POST") return allow("POST");
+        return json(await checkKnowledgeSource(store, sessionId, references[2]));
+      }
       if (req.method !== "DELETE") return allow("DELETE");
       store.removeReference(sessionId, references[2]);
       return json(store.references(sessionId));

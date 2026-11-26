@@ -127,6 +127,11 @@ export class SessionStore {
     const enabled = this.knowledgeEnabled();
     return rows.map(row => ({ ...row, paused: row.kind === "knowledge" && !enabled }));
   }
+  knowledgeSource(session: string, id: string) {
+    return this.db.prepare(
+      "SELECT project,path,version FROM file_references WHERE session=? AND id=? AND kind='knowledge'",
+    ).get(session, id) as { project: string; path: string; version: string } | undefined;
+  }
   addReference(
     session: string,
     project: string,

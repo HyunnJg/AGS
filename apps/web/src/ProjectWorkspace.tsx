@@ -48,7 +48,14 @@ function NameForm({ label, save }: { label: string; save: (name: string) => Prom
     </form>
   );
 }
-type View = { path: string; folder: boolean; position: number; version?: string; excerpt?: string };
+type View = {
+  path: string;
+  folder: boolean;
+  position: number;
+  end?: number;
+  version?: string;
+  excerpt?: string;
+};
 const top: View = { path: "", folder: true, position: 0 };
 function FileBrowser({
   token,
@@ -57,8 +64,10 @@ function FileBrowser({
   section,
   refresh,
   knowledge = false,
+  active = true,
 }: {
   knowledge?: boolean;
+  active?: boolean;
   section: Section;
   refresh: (id: string) => Promise<void>;
   token: string;
@@ -77,6 +86,7 @@ function FileBrowser({
   }>();
   const [line, setLine] = useState("1");
   useEffect(() => {
+    if (!active) return;
     let current = true;
     const key = view.folder ? "entries" : "file";
     api(token, `/api/projects/${project.id}/${key}`, "POST", {
@@ -94,12 +104,12 @@ function FileBrowser({
     return () => {
       current = false;
     };
-  }, [project.id, token, view, project.root]);
+  }, [active, project.id, token, view, project.root]);
   const result = data?.view === view ? data : undefined;
   const nextOffset = result?.dir?.next;
-  const enter = (path: string, folder: boolean, position = 1) => {
+  const enter = (path: string, folder: boolean, position = 1, end?: number) => {
     setSaved("");
-    setView({ path, folder, position: folder ? 0 : position });
+    setView({ path, folder, position: folder ? 0 : position, ...(end !== undefined && { end }) });
     setLine(String(position));
   };
   const jump = (position: number) => {
@@ -127,6 +137,17 @@ function FileBrowser({
             }}
           >
             이전 문서
+          </button>
+        )}
+        {knowledge && (trail.length > 0 || view.position > 1) && (
+          <button
+            type="button"
+            onClick={() => {
+              setTrail([]);
+              enter("INDEX.md", false);
+            }}
+          >
+            처음 안내도
           </button>
         )}
         {!knowledge && view.path && (
@@ -239,19 +260,20 @@ function FileBrowser({
             <IndexLinks
               path={view.path}
               text={result.file.text}
-              open={(p, line) => {
+              open={(p, line, end) => {
                 if (knowledge) setTrail((previous) => [...previous.slice(-31), view]);
-                enter(p, false, line);
+                enter(p, false, line, end);
               }}
             />
           )}
           {current && result.file.total > 0 && (
             <AttachLines
-              key={`${current.id}:${view.path}:${result.file.start}:${result.file.version}`}
+              key={`${current.id}:${view.path}:${result.file.start}:${result.file.version}:${view.end ?? ""}`}
               token={token}
               project={project}
               path={view.path}
               page={result.file}
+              rangeEnd={view.end}
               kind={knowledge ? "knowledge" : "file"}
               session={current}
               reopen={() => enter(view.path, false)}
@@ -302,14 +324,19 @@ function IndexLinks({
 }: {
   path: string;
   text: string;
-  open: (p: string, line: number) => void;
+  open: (p: string, line: number, end?: number) => void;
 }) {
-  const links = new Map<string, { label: string; path: string; line: number }>();
+  const links = new Map<string, { label: string; path: string; line: number; end?: number }>();
   for (const match of text.matchAll(/(?<!!)\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     const [target, anchor] = (match[2] ?? "").split("#");
-    const line = /^L([1-9]\d*)(?:-L[1-9]\d*)?$/.exec(anchor ?? "");
+    const line = /^L([1-9]\d*)(?:-L([1-9]\d*))?$/.exec(anchor ?? "");
     const position = line ? Number(line[1]) : 1;
-    if (!Number.isSafeInteger(position)) continue;
+    const end = line?.[2] ? Number(line[2]) : undefined;
+    if (
+      !Number.isSafeInteger(position) ||
+      (end !== undefined && (!Number.isSafeInteger(end) || end < position))
+    )
+      continue;
     if (!target || /[:\\]/.test(target) || target.startsWith("/")) continue;
     const parts = path.split("/").slice(0, -1);
     let valid = true;
@@ -324,16 +351,21 @@ function IndexLinks({
     }
     if (valid && parts.length) {
       const path = parts.join("/");
-      links.set(`${path}#${position}`, { label: match[1] ?? target, path, line: position });
+      links.set(`${path}#${position}-${end ?? ""}`, {
+        label: match[1] ?? target,
+        path,
+        line: position,
+        ...(end !== undefined && { end }),
+      });
     }
   }
   return (
     links.size > 0 && (
       <section className="index-links" aria-label="안내도 링크">
         {[...links].map(([key, link]) => (
-          <button type="button" key={key} onClick={() => open(link.path, link.line)}>
+          <button type="button" key={key} onClick={() => open(link.path, link.line, link.end)}>
             {link.label} · {link.path}
-            {link.line > 1 && ` · ${link.line}줄`}
+            {link.end !== undefined ? ` · ${link.line}–${link.end}줄` : link.line > 1 && ` · ${link.line}줄`}
           </button>
         ))}
       </section>
@@ -607,8 +639,8 @@ export function ProjectWorkspace({
                 refresh={refresh}
               />
             </div>
-            {tab === "knowledge" &&
-              (project.root && section ? (
+            <div hidden={tab !== "knowledge"}>
+              {project.root && section ? (
                 <FileBrowser
                   key={project.root}
                   token={token}
@@ -617,10 +649,12 @@ export function ProjectWorkspace({
                   current={current}
                   refresh={refresh}
                   knowledge
+                  active={tab === "knowledge"}
                 />
               ) : (
                 <small>파일 탭에서 프로젝트의 작업 폴더를 먼저 연결하세요.</small>
-              ))}
+              )}
+            </div>
             {tab === "activity" && <WorkspaceActivity token={token} project={project.id} />}
           </section>
         )}
