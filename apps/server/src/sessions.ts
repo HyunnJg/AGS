@@ -1,3 +1,4 @@
+import type { Review } from "../../../packages/contracts/src/reviews.ts";
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
 import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
 import type { Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
@@ -79,6 +80,12 @@ export class SessionStore {
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
           preset TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS collaboration_setting(id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO collaboration_setting VALUES(1,0);
+        CREATE TABLE IF NOT EXISTS reviews(
+          id TEXT PRIMARY KEY REFERENCES turns(id), requester TEXT NOT NULL REFERENCES sessions(id)
+        );
+        CREATE INDEX IF NOT EXISTS reviews_by_requester ON reviews(requester);
         CREATE TABLE IF NOT EXISTS context_limits (session_id TEXT PRIMARY KEY REFERENCES sessions(id), turns INTEGER NOT NULL, inputBudget INTEGER, outputBudget INTEGER);
         CREATE TABLE IF NOT EXISTS shared_prompt (id INTEGER PRIMARY KEY CHECK(id=1), prompt TEXT NOT NULL);
         INSERT OR IGNORE INTO shared_prompt(id,prompt) VALUES(1,'');
@@ -253,6 +260,36 @@ export class SessionStore {
   }
   setKnowledgeEnabled(enabled: boolean) {
     this.db.prepare("UPDATE knowledge_setting SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  collaborationEnabled() {
+    return this.db.prepare("SELECT enabled FROM collaboration_setting WHERE id=1").get()?.enabled === 1;
+  }
+  setCollaborationEnabled(enabled: boolean) {
+    this.db.prepare("UPDATE collaboration_setting SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  review(requester: string, id?: string) {
+    return this.db.prepare(`SELECT t.id,t.session_id AS reviewer,t.message,t.reply,t.status,t.provider,t.model
+      FROM reviews r JOIN turns t ON r.id=t.id WHERE r.requester=? AND (? IS NULL OR r.id=?)
+      ORDER BY r.rowid DESC LIMIT 1`).get(requester,id ?? null,id ?? null) as unknown as Review | undefined;
+  }
+  startReview(requester: string, id: string, target: ModelSelection, message: string) {
+    if (this.db.prepare("SELECT 1 FROM turns WHERE id=?").get(id)) throw new WorkspaceError(409, "review_id_conflict");
+    if (this.review(requester)?.status === "streaming") throw new WorkspaceError(409, "review_busy");
+    this.db.exec("BEGIN");
+    try {
+      const reviewer = this.create(target);
+      this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(`검토 · ${Array.from(message).slice(0,24).join("")}`, reviewer.id);
+      this.db.prepare(`INSERT INTO turns(id,session_id,message,status,preset,provider,model)
+        VALUES(?,?,?,'streaming','general',?,?)`).run(id,reviewer.id,message,target.provider,target.model);
+      this.db.prepare("INSERT INTO reviews(id,requester) VALUES(?,?)").run(id,requester);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  finishReview(id: string, reply: string) {
+    this.db.prepare("UPDATE turns SET reply=?,status='completed' WHERE id=? AND status='streaming'").run(reply,id);
   }
   updateMemoryEnabled() {
     return this.db.prepare("SELECT enabled FROM checkpoint_setting WHERE id=1").get()?.enabled === 1;

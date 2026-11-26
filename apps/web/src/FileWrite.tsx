@@ -8,8 +8,10 @@ export function FileWrite({
   path,
   version,
   saved,
+  initialFile,
   session,
 }: {
+  initialFile?: { name: string; text: string };
   session: string | undefined;
   token: string;
   project: Project;
@@ -45,6 +47,10 @@ export function FileWrite({
     setError("");
     setBusy(true);
     try {
+      if (creating && initialFile) {
+        setName(initialFile.name);
+        setText(initialFile.text);
+      }
       if (!creating) {
         const requestedVersion = conflicted
           ? (await (await api(token, `${route}/file`, "POST", { path, root: project.root })).json()).version
@@ -147,7 +153,7 @@ export function FileWrite({
     <section className="file-write" aria-label="파일 변경">
       {!open && (
         <button type="button" disabled={busy} onClick={() => void begin()}>
-          {creating ? "새 파일" : "파일 수정"}
+          {initialFile ? "검토 결과 파일로 저장" : creating ? "새 파일" : "파일 수정"}
         </button>
       )}
       {open && (

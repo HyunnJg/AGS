@@ -111,3 +111,10 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 
 
 `POST /api/sessions/{sessionId}/references/{id}/check`는 해당 대화에 저장된 지식 발췌와 현재 연결된 프로젝트의 같은 상대 경로를 비교한다. 응답은 `{status, checkedAt}`이다. `current`는 전체 텍스트 버전 일치, `changed`는 버전 차이, `unavailable`은 연결 해제·파일 삭제·권한 제한 등으로 비교할 수 없음을 뜻한다. checkedAt은 확인 시각(Unix 밀리초)이다. 일반 첨부, 다른 대화의 첨부, 삭제된 발췌는 404를 반환한다. 발췌 목록을 펼치거나 다시 확인할 때만 원본을 조회한다. 비교는 저장된 발췌 및 전송 내용을 변경하지 않는다.
+
+
+### 독립 모델 검토
+
+`GET/PUT /api/settings/collaboration`은 협업 허용 여부(`enabled`, 기본 false)를 조회·변경한다. 끄면 새 검토 호출을 막는다. `POST /api/sessions/{id}/review`는 클라이언트가 생성한 UUID `id`, `target: {provider, model}`, `message`(1–8,000자), `approved: true`를 받는다. 승인된 본문과 고정 검토 지침으로 별도 세션에서 한 번 호출하며 외부 모델의 최대 출력은 1,200토큰이다. 같은 ID로 같은 요청을 재전송하면 기존 상태를 반환한다. 동일 원본 대화에서 서로 다른 검토를 동시에 요청하면 409다. HTTP 연결 중단 또는 서버의 전체 시간 제한은 진행 중인 호출을 중지한다.
+
+`GET /api/sessions/{id}/review`는 최근 검토 또는 null을 반환한다. 결과에는 요청 ID, 독립 세션 ID(`reviewer`), 선택한 모델, 보낸 본문, 응답, 상태가 포함된다. 이전 검토는 각각의 세션에 남는다. 재시작 시 실행 중이던 검토는 interrupted로 복구한다. 결과의 작업 폴더 저장은 일반 파일 생성과 같은 제안·승인 경로를 사용한다.

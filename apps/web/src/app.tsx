@@ -1,3 +1,4 @@
+import { ReviewEditor } from "./ReviewEditor.tsx";
 import { CheckpointEditor } from "./CheckpointEditor.tsx";
 import { staleStateMessage, memoryUseLabel } from "../../../packages/contracts/src/context.ts";
 import { AttachedReferences } from "./FileReferences.tsx";
@@ -93,6 +94,7 @@ function Conversation({
   displayRules,
   options,
   onRemoteActivity,
+  onReviewer,
   text,
   setText,
   visible,
@@ -105,6 +107,7 @@ function Conversation({
   favorites: ModelSelection[];
   displayRules: DisplayRule[];
   options: ProviderOption[];
+  onReviewer: (id: string) => void;
   onRemoteActivity: (id: string, active: boolean) => void;
   text: string;
   setText: (value: string) => void;
@@ -112,6 +115,11 @@ function Conversation({
   const choices: ModelSelection[] = [{ provider: "mock", model: "" }, ...favorites];
   if (!choices.some((c) => c.provider === session.provider && c.model === session.model))
     choices.push(session);
+  const reviewChoices = choices.filter(choice => options.some(o => o.id === choice.provider && o.enabled));
+  for (const o of options) {
+    if (o.enabled && o.defaultModel && !reviewChoices.some(c => c.provider === o.id && c.model === o.defaultModel))
+      reviewChoices.push({ provider: o.id, model: o.defaultModel });
+  }
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [ready, setReady] = useState(false);
@@ -295,6 +303,10 @@ function Conversation({
         </div>
       </div>
       <div className="composer">
+        <ReviewEditor token={token} session={session}
+          choices={reviewChoices}
+          lastReply={turns.findLast(t=>t.status==="completed")?.reply ?? ""}
+          insert={value=>setText(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
         {session.sectionId && <CheckpointEditor token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} />
@@ -543,6 +555,12 @@ function Workspace({ token }: { token: string }) {
             visible={current.id === id}
             text={drafts[current.id] ?? ""}
             setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
+            onReviewer={async reviewer => {
+              try {
+                const data = await (await api(token,`/api/sessions/${reviewer}`)).json();
+                setSessions(prev => [data.session,...prev.filter(s=>s.id!==reviewer)]);
+              } catch (e) { setError(problem(e)); }
+            }}
             onRemoteActivity={onRemoteActivity}
             displayRules={displayRules}
             favorites={favorites}
