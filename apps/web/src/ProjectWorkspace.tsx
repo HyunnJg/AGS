@@ -79,12 +79,14 @@ function FileBrowser({
   const [saved, setSaved] = useState("");
   const [data, setData] = useState<{
     view: View;
+    rescan: number;
     dir?: DirectoryPage;
     file?: FilePage;
     error?: string;
     stale?: boolean;
   }>();
   const [line, setLine] = useState("1");
+  const [rescan, setRescan] = useState(0);
   useEffect(() => {
     if (!active) return;
     let current = true;
@@ -96,15 +98,23 @@ function FileBrowser({
     })
       .then((r) => r.json())
       .then((result) => {
-        if (current) setData(view.folder ? { view, dir: result } : { view, file: result });
+        if (current) setData(view.folder ? { view, rescan, dir: result } : { view, rescan, file: result });
       })
       .catch((e) => {
-        if (current) setData({ view, error: message(e), stale: e instanceof SearchResultChanged });
+        if (current) {
+          setData((previous) => ({
+            ...(previous?.view === view && previous.dir ? { dir: previous.dir } : {}),
+            view,
+            rescan,
+            error: message(e),
+            stale: e instanceof SearchResultChanged,
+          }));
+        }
       });
     return () => {
       current = false;
     };
-  }, [active, project.id, token, view, project.root]);
+  }, [active, project.id, token, view, project.root, rescan]);
   const result = data?.view === view ? data : undefined;
   const nextOffset = result?.dir?.next;
   const enter = (path: string, folder: boolean, position = 1, end?: number) => {
@@ -148,6 +158,11 @@ function FileBrowser({
             }}
           >
             처음 안내도
+          </button>
+        )}
+        {result?.dir && !result.error && (
+          <button type="button" disabled={result.rescan !== rescan} onClick={() => setRescan((n) => n + 1)}>
+            {result.rescan === rescan ? "폴더 목록 새로고침" : "목록 읽는 중…"}
           </button>
         )}
         {!knowledge && view.path && (
@@ -200,7 +215,7 @@ function FileBrowser({
           }}
         />
       )}
-      {saved === view.path && saved && <output>저장했습니다.</output>}
+      {saved === view.path && saved && <output>저장했습니다 · {saved}</output>}
       {!result && <output>불러오는 중…</output>}
       {result?.error && (
         <>
@@ -213,7 +228,7 @@ function FileBrowser({
               최신 파일 1줄부터 열기
             </button>
           )}
-          <button type="button" onClick={() => setView({ ...view })}>
+          <button type="button" onClick={() => setRescan((n) => n + 1)}>
             다시 읽기
           </button>
         </>
