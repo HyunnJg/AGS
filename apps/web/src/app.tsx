@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { presets, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
 import {
+  isModelSelection,
   providerNames,
   type ProviderOption,
   type ModelSelection,
@@ -112,14 +113,17 @@ function Conversation({
   text: string;
   setText: (value: string) => void;
 }) {
-  const choices: ModelSelection[] = [{ provider: "mock", model: "" }, ...favorites];
-  if (!choices.some((c) => c.provider === session.provider && c.model === session.model))
-    choices.push(session);
-  const reviewChoices = choices.filter(choice => options.some(o => o.id === choice.provider && o.enabled));
-  for (const o of options) {
-    if (o.enabled && o.defaultModel && !reviewChoices.some(c => c.provider === o.id && c.model === o.defaultModel))
-      reviewChoices.push({ provider: o.id, model: o.defaultModel });
+  const choices: ModelSelection[] = [];
+  for (const option of options) {
+    const models = new Set<string>();
+    if (isModelSelection({ provider: option.id, model: option.defaultModel })) {
+      models.add(option.defaultModel);
+    }
+    for (const pin of favorites) if (pin.provider === option.id) models.add(pin.model);
+    if (session.provider === option.id) models.add(session.model);
+    for (const model of models) choices.push({ provider: option.id, model });
   }
+  const reviewChoices = choices.filter(choice => options.some(o => o.id === choice.provider && o.enabled));
   const references = useFileReferences(token, session.id);
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -329,7 +333,7 @@ function Conversation({
             <select
               className="quick-model"
               aria-label="등록 모델 선택"
-              title="설정에서 별표로 등록한 모델"
+              title="공급자 기본 모델과 즐겨찾기"
               value={JSON.stringify([session.provider, session.model])}
               disabled={!ready || busy || remoteStreaming || savingPreset}
               onChange={(e) => {

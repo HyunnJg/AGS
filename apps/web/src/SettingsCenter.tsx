@@ -101,6 +101,7 @@ function ModelList({
       <label>
         모델 검색
         <input
+          form="apply-chat-model"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -154,7 +155,7 @@ function ModelList({
       )}
       <label>
         모델 ID
-        <input required maxLength={256} value={model} onChange={(e) => choose(e.target.value)} />
+        <input form="apply-chat-model" required maxLength={256} value={model} onChange={(e) => choose(e.target.value)} />
       </label>
       {!all.has(model.trim()) && isModelSelection({ provider, model: model.trim() }) && (
         <button type="button" disabled={pinning} onClick={() => void toggle(model.trim())}>
@@ -331,31 +332,36 @@ export function SettingsCenter({
                   provider={provider}
                   token={token}
                   enabled={enabled}
+                  locked={saving}
+                  selectedModel={model.trim()}
                   onBusy={setSaving}
-                  onSave={(choices, next, previous) => {
+                  onSave={(choices, next, previous, connectionChanged) => {
                     onOptions(choices);
-                    if (!model || model === previous) setModel(next);
-                    refreshCatalog((n) => n + 1);
+                    if (connectionChanged) {
+                      if (!model || model === previous) setModel(next);
+                      refreshCatalog((n) => n + 1);
+                    }
                   }}
-                />
+                >
+                  {enabled && (
+                    <ModelList
+                      key={provider + catalogVersion}
+                      token={token}
+                      provider={provider}
+                      model={model}
+                      choose={setModel}
+                    />
+                  )}
+                </ProviderConnection>
               )}
               <form
+                id="apply-chat-model"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void apply();
                 }}
               >
-                {!enabled ? null : provider === "mock" ? (
-                  <small>API 키 없이 응답을 확인하는 로컬 테스트 모델입니다.</small>
-                ) : (
-                  <ModelList
-                    key={provider + catalogVersion}
-                    token={token}
-                    provider={provider}
-                    model={model}
-                    choose={setModel}
-                  />
-                )}
+                {provider === "mock" && <small>API 키 없이 응답을 확인하는 로컬 테스트 모델입니다.</small>}
                 {error && <p role="alert">{error}</p>}
                 {streaming && <small>이 대화의 응답이 끝나면 모델을 변경할 수 있습니다.</small>}
                 <footer>

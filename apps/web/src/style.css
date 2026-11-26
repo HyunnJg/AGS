@@ -755,7 +755,9 @@ header h2 {
 .provider-connection button { justify-self: start; }
 .provider-connection .remove-provider-key { display: flex; align-items: center; gap: 6px; }
 .provider-connection .remove-provider-key input { width: auto; }
-.provider-connection output { display: block; margin-top: 8px; }
+.default-model { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: .75rem 0; }
+.default-model small { flex-basis: 100%; overflow-wrap: anywhere; }
+.default-model button { font-size: .85rem; }
 
 .call-logs, .call-detail { display: grid; gap: 10px; min-width: 0; }
 .call-logs .match-case { display: flex; align-items: center; gap: 6px; }
