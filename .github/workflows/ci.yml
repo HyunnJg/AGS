@@ -39,12 +39,15 @@ jobs:
           $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-package-test"
           & "$package/Start-AGS.cmd" --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $backup = Join-Path $env:RUNNER_TEMP "AGS test.ags-backup"
+          Set-Location $env:RUNNER_TEMP
+          $backup = "AGS test.ags-backup"
           & "$package/Start-AGS.cmd" export "$backup"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-restored"
-          & "$package/Start-AGS.cmd" restore "$backup" "$env:AGS_STATE_DIR"
+          if (!(Test-Path $backup)) { throw "Missing backup in caller directory" }
+          & "$package/Start-AGS.cmd" restore "$backup" "ags-restored"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:AGS_STATE_DIR = Join-Path $env:RUNNER_TEMP "ags-restored"
+          if (!(Test-Path "$env:AGS_STATE_DIR/sessions.sqlite")) { throw "Missing restored database" }
           & "$package/Start-AGS.cmd" --check
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
