@@ -263,6 +263,7 @@ function Conversation({
       setError(problem(e));
     }
   }
+  const selectablePresets = customPresets.filter((item) => !item.archived || item.id === session.preset);
   return (
     <section className="conversation" hidden={!visible}>
       <header>
@@ -286,8 +287,10 @@ function Conversation({
             {isCustomPresetId(session.preset) && !customPresets.some((item) => item.id === session.preset) && (
               <option value={session.preset}>사용자 프리셋</option>
             )}
-            {customPresets.length > 0 && <optgroup label="사용자 프리셋">
-              {customPresets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            {selectablePresets.length > 0 && <optgroup label="사용자 프리셋">
+              {selectablePresets.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}{item.archived && " (보관됨)"}</option>
+              ))}
             </optgroup>}
           </select>
         </label>
@@ -414,7 +417,7 @@ function Workspace({ token }: { token: string }) {
         }
       }
       void read<ProviderOption[]>("/api/providers", setOptions);
-      void read<CustomPresetSummary[]>("/api/settings/presets", setCustomPresets);
+      void read<CustomPresetSummary[]>("/api/settings/presets?includeArchived=1", setCustomPresets);
       void read<ModelSelection[]>("/api/settings/favorites", setFavorites);
       void read<{ rules: DisplayRule[] }>("/api/settings/display-rules", ({ rules }) => {
         setDisplayRules((prev) => JSON.stringify(prev) === JSON.stringify(rules) ? prev : rules);

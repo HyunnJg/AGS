@@ -55,6 +55,7 @@ test("이전 CRLF 프리셋의 재등록은 기존 ID와 원본을 보존한다"
   const old = new DatabaseSync(path);
   const id = "custom-00000000-0000-4000-8000-000000000001";
   const original = "# 원칙\r\n근거를 확인한다.\r\n";
+  old.exec("ALTER TABLE custom_presets DROP COLUMN archived; PRAGMA user_version=7");
   old.prepare("INSERT INTO custom_presets VALUES(?,?,?)").run(id, "역사", original);
   old.close();
   const store = new SessionStore(path);

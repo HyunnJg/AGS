@@ -22,7 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 7;
+export const sessionSchemaVersion = 8;
 
 const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
@@ -141,6 +141,9 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 6) {
         this.db.exec("CREATE TABLE custom_presets (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, instructions TEXT NOT NULL); PRAGMA user_version=7");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 7) {
+        this.db.exec("ALTER TABLE custom_presets ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)); PRAGMA user_version=8");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -589,12 +592,23 @@ export class SessionStore {
       .prepare("UPDATE sessions SET provider=?, model=? WHERE id=?")
       .run(selection.provider, selection.model, id);
   }
-  customPresets() {
-    return this.db.prepare("SELECT id,name FROM custom_presets ORDER BY name,id").all() as unknown as CustomPresetSummary[];
+  customPresets(includeArchived = false): CustomPresetSummary[] {
+    const rows = this.db
+      .prepare("SELECT id,name,archived FROM custom_presets WHERE archived=0 OR ?=1 ORDER BY name,id")
+      .all(Number(includeArchived));
+    return rows.map((row) => ({
+      id: row.id as CustomPresetId,
+      name: String(row.name),
+      ...(includeArchived && { archived: row.archived === 1 }),
+    }));
+  }
+  setPresetArchived(id: CustomPresetId, archived: boolean) {
+    const result = this.db.prepare("UPDATE custom_presets SET archived=? WHERE id=?").run(Number(archived), id);
+    if (!result.changes) throw new WorkspaceError(404, "unknown_preset");
   }
   presetContent(id: Preset) {
     if (isBuiltinPreset(id)) return id;
-    const row = this.db.prepare("SELECT * FROM custom_presets WHERE id=?").get(id);
+    const row = this.db.prepare("SELECT id,name,instructions FROM custom_presets WHERE id=?").get(id);
     if (!row) throw new WorkspaceError(404, "unknown_preset");
     return row as unknown as CustomPreset;
   }
@@ -603,10 +617,15 @@ export class SessionStore {
     const existing = this.db.prepare("SELECT * FROM custom_presets WHERE name=?").get(name);
     if (existing) {
       if (normalizePresetText(String(existing.instructions)) !== instructions) throw new WorkspaceError(409, "preset_name_taken");
-      return existing as unknown as CustomPreset;
+      return {
+        id: existing.id as CustomPresetId,
+        name,
+        instructions: String(existing.instructions),
+        ...(existing.archived === 1 && { archived: true }),
+      };
     }
     const id: CustomPresetId = `custom-${randomUUID()}`;
-    this.db.prepare("INSERT INTO custom_presets VALUES(?,?,?)").run(id, name, instructions);
+    this.db.prepare("INSERT INTO custom_presets(id,name,instructions) VALUES(?,?,?)").run(id, name, instructions);
     return { id, name, instructions };
   }
   setPreset(id: string, preset: Preset) {

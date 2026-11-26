@@ -231,8 +231,21 @@ export function createChatServer(
       if (!isPresetDraft(body)) throw new RequestError(400, "invalid_preset");
       return json(store.addPreset(body.name.trim(), body.instructions));
     }
-    const customId = path.startsWith("/api/settings/presets/") ? path.slice("/api/settings/presets/".length) : undefined;
+    if (path === "/api/settings/presets?includeArchived=1" && store) {
+      if (req.method !== "GET") return allow("GET");
+      return json(store.customPresets(true));
+    }
+    const presetRoute = /^\/api\/settings\/presets\/([^/]+)(\/archive)?$/.exec(path);
+    const customId = presetRoute?.[1];
     if (store && isCustomPresetId(customId)) {
+      if (presetRoute?.[2]) {
+        if (req.method !== "PUT") return allow("PUT");
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || !("archived" in body) || typeof body.archived !== "boolean")
+          throw new RequestError(400, "invalid_preset");
+        store.setPresetArchived(customId, body.archived);
+        return json({ archived: body.archived });
+      }
       if (req.method !== "GET") return allow("GET");
       return json(store.presetContent(customId));
     }
