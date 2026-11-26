@@ -18,6 +18,7 @@ export interface CallSummary extends ModelSelection {
   httpStatus: number | null;
 }
 export interface CallLog extends CallSummary {
+  request?: { messageCount: number; contentBytes: number; maxTokens: number | null };
   headers: Record<string, string>;
   body: string;
   bodyLimited: boolean;

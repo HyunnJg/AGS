@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CallKind, CallLog, CallStatus } from "../../contracts/src/calls.ts";
+import type { Message } from "../../contracts/src/context.ts";
 import type { ModelSelection } from "../../contracts/src/providers.ts";
 
 const limit = 65536;
@@ -17,6 +18,7 @@ export class CallCapture {
   private clipped = false;
   private text = "";
   private textClipped = false;
+  private request?: CallLog["request"];
   private http: number | null = null;
   private headers: Record<string, string> = {};
   private done = false;
@@ -31,6 +33,13 @@ export class CallCapture {
   }
   protect(...values: (string | undefined)[]) {
     for (const value of values) if (value) this.secrets.add(value);
+  }
+  recordRequest(messages: Message[], maxTokens?: number | null) {
+    this.request = {
+      messageCount: messages.length,
+      contentBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.content, "utf8"), 0),
+      maxTokens: maxTokens ?? null,
+    };
   }
   response(response: Response) {
     this.http = response.status;
@@ -89,6 +98,7 @@ export class CallCapture {
         durationMs: Date.now() - this.started,
         status,
         httpStatus: this.http,
+        ...(this.request && { request: this.request }),
         headers: this.headers,
         body: sensitiveAnswer && raw ? hidden : this.clean(raw, this.clipped),
         bodyLimited: this.clipped,

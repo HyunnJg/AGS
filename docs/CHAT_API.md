@@ -125,3 +125,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 인증된 `GET /api/call-logs`는 종료 순서가 최신인 호출부터 최대 100건의 요약을 반환한다. `GET /api/call-logs/{id}`는 단건 상세, `GET /api/call-logs/export`는 같은 상세 형식의 전체 배열이다. `GET/PUT /api/settings/call-logs`는 새 호출 기록 설정(`enabled`)을 읽고 변경한다. 요청자는 로컬 토큰을 제공해야 한다.
 
 상세에는 호출 종류·세션·모델·시작 시각·소요 시간·종료 상태·HTTP 상태, 응답 헤더, 수신한 본문과 조립한 답변이 들어간다. 본문은 fetch가 디코딩한 HTTP 스트림에서 실제 읽은 UTF-8 텍스트이며 SSE 주석·usage·종료 프레임도 포함한다. 응답 헤더는 콘텐츠 형식·요청 ID·속도 제한 등 진단용 값만 표시한다. 응답이 없는 경우 HTTP 상태는 null이다. 목록 캐시 적중은 새 호출을 만들지 않는다. 완료·실패·중단·시간 초과 시 저장하며 프로세스 강제 종료 전 끝나지 않은 호출은 기록되지 않는다. `bodyLimited` 및 `answerLimited`는 수집 상한 도달 등으로 일부만 보존되었음을 뜻한다.
+
+공급자 채팅 요청을 시도한 호출의 상세와 JSON 내보내기에는 `request`가 포함된다. `messageCount`는 전송 메시지 수, `contentBytes`는 각 메시지 `content`의 UTF-8 바이트 수 합계, `maxTokens`는 요청의 `max_tokens` 값(미지정 시 null)이다. 로컬 mock·모델 목록 조회 및 이전 버전에서 저장한 기록에서는 이 필드를 생략한다.
+
+인증된 `DELETE /api/call-logs`는 현재 저장된 호출 로그만 일괄 삭제하고 `{ deleted: 건수 }`를 반환한다. 빈 목록도 성공으로 처리한다. 진행 중인 호출은 시작 당시의 기록 설정에 따라 종료 시 저장된다.
