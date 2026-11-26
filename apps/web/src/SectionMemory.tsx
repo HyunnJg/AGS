@@ -88,6 +88,8 @@ export function SectionStateSource({
 export function SectionMemorySetting({ token }: { token: string }) {
   return (
     <>
+      <MemoryToggle token={token} path="/api/settings/collaboration" label="AI 협업 허용"
+        detail="대화에서 승인한 요청을 선택한 모델의 독립 검토 대화로 보냅니다." />
       <MemoryToggle
         token={token}
         path="/api/settings/section-memory"
@@ -141,6 +143,7 @@ function MemoryToggle({
     try {
       const data = await (await api(token, path, "PUT", { enabled: !enabled })).json();
       setEnabled(data.enabled);
+      if (path.endsWith("/collaboration")) window.dispatchEvent(new Event("ags-collaboration-setting"));
       if (path.endsWith("/knowledge")) window.dispatchEvent(new Event("ags-knowledge-setting"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "설정을 저장하지 못했습니다.");

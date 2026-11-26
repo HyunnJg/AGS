@@ -1,3 +1,4 @@
+import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
@@ -226,6 +227,15 @@ export function createChatServer(
         throw new RequestError(409, "settings_changed");
       return json(store.promptSettings());
     }
+    if (store && path === "/api/settings/collaboration") {
+      if (req.method === "PUT") {
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || !("enabled" in body) || typeof body.enabled !== "boolean")
+          throw new RequestError(400, "invalid_setting");
+        store.setCollaborationEnabled(body.enabled);
+      } else if (req.method !== "GET") return allow("GET, PUT");
+      return json({ enabled: store.collaborationEnabled() });
+    }
     if (store && ["/api/settings/section-memory", "/api/settings/memory-update", "/api/settings/knowledge"].includes(path)) {
       const knowledge = path.endsWith("/knowledge");
       const updating = path.endsWith("memory-update");
@@ -283,6 +293,30 @@ export function createChatServer(
         return json(store.create(isModelSelection(selection) ? selection : undefined, sectionId), 201);
       }
       return allow("GET, POST");
+    }
+    const reviewRoute = /^\/api\/sessions\/([a-f0-9-]{36})\/review$/.exec(path);
+    if (reviewRoute?.[1] && store) {
+      const id = reviewRoute[1];
+      if (!store.get(id)) throw new RequestError(404, "unknown_session");
+      if (req.method === "GET") return json(store.review(id) ?? null);
+      if (req.method !== "POST") return allow("GET, POST");
+      const body = await readBody(req);
+      if (res.destroyed) return;
+      const controller = new AbortController();
+      let reviewId: string | undefined;
+      const abort = () => controller.abort();
+      res.once("close", abort);
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(totalTimeoutMs)]);
+        const result = await runReview(store, id, body, providers, signal, turn => {
+          reviewId = turn;
+          active.set(turn, controller);
+        });
+        return json(result);
+      } finally {
+        if (reviewId) active.delete(reviewId);
+        res.off("close", abort);
+      }
     }
     const references =
       /^\/api\/sessions\/([a-f0-9-]{36})\/references(?:\/([a-f0-9-]{36})(\/check)?)?$/.exec(path);
