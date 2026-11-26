@@ -61,6 +61,17 @@ export class SessionStore {
         WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
           DELETE FROM section_state_source WHERE section IN (SELECT id FROM sections WHERE projectId=NEW.id);
         END;
+        CREATE TABLE IF NOT EXISTS checkpoint_setting(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO checkpoint_setting VALUES(1,1);
+        CREATE TABLE IF NOT EXISTS checkpoints(
+          session TEXT NOT NULL REFERENCES sessions(id), first TEXT NOT NULL REFERENCES turns(id),
+          last TEXT NOT NULL REFERENCES turns(id), path TEXT NOT NULL UNIQUE, version TEXT NOT NULL,
+          saved INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,first)
+        );
+        CREATE TRIGGER IF NOT EXISTS clear_checkpoints AFTER UPDATE OF root,identity ON projects
+        WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
+          DELETE FROM checkpoints WHERE session IN (SELECT t.id FROM sessions t JOIN sections s ON s.id=t.sectionId WHERE s.projectId=NEW.id);
+        END;
         CREATE TABLE IF NOT EXISTS turns (
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
@@ -221,6 +232,46 @@ export class SessionStore {
   }
   setMemoryEnabled(enabled: boolean) {
     this.db.prepare("UPDATE memory_settings SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  updateMemoryEnabled() {
+    return this.db.prepare("SELECT enabled FROM checkpoint_setting WHERE id=1").get()?.enabled === 1;
+  }
+  setUpdateMemoryEnabled(enabled: boolean) {
+    this.db.prepare("UPDATE checkpoint_setting SET enabled=? WHERE id=1").run(Number(enabled));
+  }
+  sectionProject(id: string) {
+    return this.db.prepare("SELECT projectId FROM sections WHERE id=?").get(id)?.projectId as
+      | string
+      | undefined;
+  }
+  checkpointTurns(session: string, limit: number) {
+    return this.db
+      .prepare(`SELECT id,substr(message,1,3001) AS message,substr(reply,1,3001) AS reply FROM turns
+      WHERE session_id=? AND status='completed' AND rowid > COALESCE((SELECT MAX(t.rowid) FROM turns t
+      JOIN checkpoints c ON c.last=t.id WHERE c.session=? AND c.saved=1),0) ORDER BY rowid LIMIT ?`)
+      .all(session, session, limit) as unknown as Pick<Turn, "id" | "message" | "reply">[];
+  }
+  checkpoint(session: string, first?: string) {
+    return (
+      first
+        ? this.db.prepare("SELECT * FROM checkpoints WHERE session=? AND first=?").get(session, first)
+        : this.db.prepare("SELECT * FROM checkpoints WHERE session=? AND saved=0").get(session)
+    ) as { path: string; first: string; last: string; version: string; saved: number } | undefined;
+  }
+  reserveCheckpoint(session: string, first: string, last: string, path: string, version: string) {
+    this.db
+      .prepare("INSERT INTO checkpoints(session,first,last,path,version) VALUES(?,?,?,?,?)")
+      .run(session, first, last, path, version);
+  }
+  finishCheckpoint(path: string, saved: boolean) {
+    if (saved) this.db.prepare("UPDATE checkpoints SET saved=1 WHERE path=?").run(path);
+    else this.db.prepare("DELETE FROM checkpoints WHERE path=? AND saved=0").run(path);
+  }
+  recentCheckpoints(section: string) {
+    return this.db
+      .prepare(`SELECT c.path,c.version FROM checkpoints c JOIN sessions s ON s.id=c.session
+      WHERE s.sectionId=? AND c.saved=1 ORDER BY c.rowid DESC LIMIT 3`)
+      .all(section) as unknown as { path: string; version: string }[];
   }
   activeState(section: string) {
     return this.db

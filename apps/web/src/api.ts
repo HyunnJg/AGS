@@ -8,6 +8,19 @@ export class SettingsConflict extends Error {
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 const workspaceMessages: Record<string, string> = {
+  checkpoint_too_long: "생성된 요약이 너무 깁니다. 다시 생성하세요.",
+  checkpoint_busy: "이 대화의 구간 요약을 처리 중입니다.",
+  no_checkpoint_turns: "아직 기록할 새 완료 턴이 없습니다.",
+  checkpoint_disabled: "설정 → 토글형 모듈에서 작업기억 갱신을 켜세요.",
+  checkpoint_model_changed: "대화 모델이 바뀌었습니다. 새로 열어 확인하세요.",
+  checkpoint_changed: "다른 창에서 이 구간을 먼저 기록했습니다. 다음 구간을 확인하세요.",
+  invalid_checkpoint: "폴더 연결과 요약 내용을 확인하고 초안을 다시 만드세요.",
+  checkpoint_timeout: "요약 요청이 중단됐습니다. 다시 시도할 수 있습니다.",
+  checkpoint_budget: "요약할 대화가 입력 예산을 넘습니다. 컨텍스트 제어에서 입력 예산 또는 모델을 확인하세요.",
+  checkpoint_empty: "모델이 빈 요약을 반환했습니다. 다시 시도하세요.",
+  provider_limit: "공급자 요청 한도에 도달했습니다.",
+  provider_auth: "공급자 키와 접근 권한을 확인하세요.",
+  provider_failed: "공급자가 요약을 완료하지 못했습니다. 모델 설정을 확인하세요.",
   search_cancelled: "검색이 중단됐습니다.",
   no_workspace_folder: "연결된 작업 폴더가 없습니다.",
   invalid_state_file: "첫 줄부터 전체가 보이는 80줄·6,000자 이내의 상태 파일을 선택하세요.",
@@ -62,7 +75,7 @@ export async function api(
       window.dispatchEvent(new Event("ags-unauthorized"));
       throw new Error("로컬 인증 토큰을 확인해 주세요.");
     }
-    if (path.startsWith("/api/projects")) {
+    if (path.startsWith("/api/projects") || path.endsWith("/checkpoint")) {
       const body = await res.json().catch(() => ({}));
       if (body.error === "write_conflict") throw new WriteConflict(workspaceMessages.write_conflict);
       if (body.error === "search_result_changed")

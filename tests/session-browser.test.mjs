@@ -33,6 +33,14 @@ test(
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const payload = JSON.parse(Buffer.concat(chunks).toString());
+      if (payload.messages[0]?.content.startsWith("작업기억 초안")) {
+        assert.equal(payload.messages.length,2);
+        const sources = JSON.parse(payload.messages[1].content);
+        assert.deepEqual(sources,[{번호:1,질문:"섹션 복원 검증",답변:"복원 확인"}]);
+        res.writeHead(200, {"content-type":"text/event-stream"});
+        res.end('data: {"choices":[{"delta":{"content":"[1] 다음 확인은 현장 검수."}}]}\n\ndata: [DONE]\n\n');
+        return;
+      }
       if (payload.messages.some((m) => m.content === "섹션 복원 검증")) {
         statePayload = payload.messages;
         res.writeHead(200, { "content-type": "text/event-stream" });
@@ -493,6 +501,20 @@ test(
     await panel.getByText("섹션 현재 상태", { exact: true }).click();
     await panel.getByRole("button", { name: "현재 파일을 상태로 지정" }).click();
     await panel.getByText("섹션 현재 상태 · STATUS.md", { exact: true }).waitFor();
+    await panel.getByRole("button", {name:"작업공간 닫기"}).click();
+    const checkpointUI=page.locator(".checkpoint-editor:visible");
+    await checkpointUI.getByText("구간 요약",{exact:true}).click();
+    const draftResponse=page.waitForResponse(r=>r.url().endsWith("/checkpoint"));
+    await checkpointUI.getByRole("button",{name:/요약 초안 만들기/}).click();
+    const checkpoint=await (await draftResponse).json();
+    await checkpointUI.getByLabel("구간 요약 초안").fill("[1] 결정: 연표 초안을 보존한다. 다음: 자료 대조.");
+    await assert.rejects(readFile(join(example,checkpoint.path)),{code:"ENOENT"});
+    await checkpointUI.getByRole("button",{name:"승인하고 요약 저장"}).click();
+    await checkpointUI.getByText(/구간 요약을 저장했습니다/).waitFor();
+    assert.match(await readFile(join(example,checkpoint.path),"utf8"),/다음: 자료 대조/);
+    await checkpointUI.getByRole("button",{name:/요약 초안 만들기/}).click();
+    await checkpointUI.getByText("아직 기록할 새 완료 턴이 없습니다.").waitFor();
+    await openWorkspace();
     await panel.getByRole("button", { name: "섹션에서 새 대화" }).click();
     await panel.waitFor({ state: "hidden" });
     const freshId = await page.evaluate(() => sessionStorage.getItem("ags-session"));
@@ -503,12 +525,24 @@ test(
     })).json();
     const restored = await previewState();
     assert.equal(restored.includedTurns, 0);
+    assert.equal(restored.memoryUse.summaries,1);
+    assert.ok(restored.messages.some(m=>m.content.includes("다음: 자료 대조")));
     assert.ok(restored.messages.some((m,i) => restored.blocks[i] === "memory" && m.content.includes("발굴 조사 연표")));
     assert.equal((await page.request.patch(freshPath, {headers, data:{provider:"custom",model:"ui/test-model"}})).status(),200);
     assert.equal((await page.request.post(`${freshPath}/chat`,{headers,data:{message:"섹션 복원 검증"}})).status(),200);
     assert.deepEqual(statePayload, restored.messages);
+    const generated=await page.request.post(`${freshPath}/checkpoint`,{headers,data:{action:"draft",provider:"custom",model:"ui/test-model"}});
+    assert.equal(generated.status(),200);
+    assert.match((await generated.json()).summary,/현장 검수/);
     await page.getByRole("button", {name:"설정", exact:true}).click();
     await page.getByRole("button", {name:"토글형 모듈"}).click();
+    const updateToggle=page.getByLabel("작업기억 갱신");
+    const updateResponse=page.waitForResponse(r=>r.url().endsWith("/settings/memory-update") && r.request().method()==="PUT");
+    await updateToggle.click();
+    assert.equal((await updateResponse).status(),200);
+    const disabled=await page.request.post(`${freshPath}/checkpoint`,{headers,data:{action:"draft",provider:"custom",model:"ui/test-model"}});
+    assert.equal(disabled.status(),403);
+    assert.equal((await previewState()).memoryUse.summaries,1);
     const toggle = page.getByLabel("섹션 기억 참조");
     const flip = async () => {
       const changed = page.waitForResponse(r => r.url().endsWith("/settings/section-memory") && r.request().method()==="PUT");
@@ -516,6 +550,7 @@ test(
       assert.equal((await changed).status(), 200);
     };
     await flip();
+    assert.equal((await previewState()).memoryUse.summaries,0);
     assert.ok(!(await previewState()).messages.some(m=>m.content.includes("발굴 조사 연표")));
     await flip();
     await page.getByRole("button", {name:"설정 닫기"}).click();
@@ -524,6 +559,10 @@ test(
     assert.equal(outdated.stateStale, true);
     assert.ok(!outdated.messages.some(m=>m.content.includes("발굴 조사 연표") || m.content.includes("확인하지 않은 새 내용")));
     await openWorkspace();
+    await panel.getByRole("button",{name:"STATUS.md",exact:true}).click();
+    await panel.getByText("섹션 현재 상태 · STATUS.md",{exact:true}).click();
+    await panel.getByRole("button",{name:"현재 버전으로 상태 갱신"}).click();
+    await page.waitForFunction(() => document.querySelector(".section-state button")?.disabled);
     const noToken = await page.request.post(`${projectPath}/entries`, { data: { path: "" } });
     assert.equal(noToken.status(), 401);
     const searchData = { path: "", query: "근거" };

@@ -1,4 +1,5 @@
-import { staleStateMessage } from "../../../packages/contracts/src/context.ts";
+import { CheckpointEditor } from "./CheckpointEditor.tsx";
+import { staleStateMessage, memoryUseLabel } from "../../../packages/contracts/src/context.ts";
 import { AttachedReferences } from "./FileReferences.tsx";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
@@ -116,6 +117,7 @@ function Conversation({
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
+  const [lastMemory, setLastMemory] = useState("");
   const [pendingId, setPendingId] = useState("");
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
@@ -174,6 +176,11 @@ function Conversation({
     try {
       const r = await api(token, `${path}/chat`, "POST", { message });
       accepted = true;
+      const usage = r.headers.get("x-ags-memory-use");
+      const label = usage ? memoryUseLabel(JSON.parse(usage)) : "";
+      setLastMemory(
+        label ? `${session.provider === "mock" ? "직전 입력 구성 (mock)" : "직전 전송"} · ${label}` : "",
+      );
       if (r.headers.get("x-ags-section-state") === "stale") setError(staleStateMessage);
       const id = r.headers.get("x-request-id") ?? "";
       setPendingId(id);
@@ -288,6 +295,8 @@ function Conversation({
         </div>
       </div>
       <div className="composer">
+        {session.sectionId && <CheckpointEditor token={token} session={session} />}
+        {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} />
         <form onSubmit={send}>
           <textarea

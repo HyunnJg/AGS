@@ -1,4 +1,5 @@
-import { loadSectionState } from "./section-state.ts";
+import { CheckpointService } from "./checkpoints.ts";
+import { loadSectionState, loadCheckpoints } from "./section-state.ts";
 import { workspaceApi } from "./workspace-api.ts";
 import { WorkspaceError } from "./workspace-files.ts";
 import { ruleError, type DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -71,16 +72,25 @@ export function createChatServer(
   const authorization = Buffer.from(`Bearer ${token}`);
   const active = new Map<string, AbortController>();
 
+  const checkpoints = new CheckpointService();
+  function memoryFor(db: SessionStore, section: Session["sectionId"]) {
+    return Promise.all([loadSectionState(db, section), loadCheckpoints(db, section)]);
+  }
   function contextFor(
     db: SessionStore,
     session: Session,
     message: string,
-    state: Awaited<ReturnType<typeof loadSectionState>>,
+    [state, summaries]: Awaited<ReturnType<typeof memoryFor>>,
     limits: ContextLimits = db.limits(session.id),
   ) {
     const shared = db.promptSettings();
     const current =
       state && session.sectionId && db.activeState(session.sectionId)?.key === state.key ? state : undefined;
+    const enabled = db.memoryEnabled();
+    const refs =
+      session.sectionId && enabled && summaries.length ? db.recentCheckpoints(session.sectionId) : [];
+    const pinned = summaries.filter((s) => refs.some((r) => r.path === s.path && r.version === s.version));
+    const texts = pinned.map((s) => s.text).filter(Boolean);
     const assembled = assembleContext(
       session.preset,
       shared.prompt,
@@ -92,8 +102,24 @@ export function createChatServer(
       db.sources(session.id),
       db.references(session.id),
       current?.text,
+      texts,
     );
-    return { ...assembled, stateStale: !!current?.stale };
+    const included = new Set(
+      assembled.messages.filter((_, i) => assembled.blocks[i] === "memory").map((m) => m.content),
+    );
+    return {
+      ...assembled,
+      stateStale: !!current?.stale,
+      memoryUse: {
+        enabled,
+        state: !!current?.text && included.has(current.text),
+        summaries: texts.filter((t) => included.has(t)).length,
+        stale: pinned.filter((s) => !s.text).length + Number(!!current?.stale),
+        omitted:
+          texts.filter((t) => !included.has(t)).length +
+          Number(!!current?.text && !included.has(current.text)),
+      },
+    };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -188,14 +214,16 @@ export function createChatServer(
         throw new RequestError(409, "settings_changed");
       return json(store.promptSettings());
     }
-    if (path === "/api/settings/section-memory" && store) {
+    if ((path === "/api/settings/section-memory" || path === "/api/settings/memory-update") && store) {
+      const updating = path.endsWith("memory-update");
       if (req.method === "PUT") {
         const body = await readBody(req);
         if (!body || typeof body !== "object" || !("enabled" in body) || typeof body.enabled !== "boolean")
           throw new RequestError(400, "invalid_setting");
-        store.setMemoryEnabled(body.enabled);
+        if (updating) store.setUpdateMemoryEnabled(body.enabled);
+        else store.setMemoryEnabled(body.enabled);
       } else if (req.method !== "GET") return allow("GET, PUT");
-      return json({ enabled: store.memoryEnabled() });
+      return json({ enabled: updating ? store.updateMemoryEnabled() : store.memoryEnabled() });
     }
     if (path === "/api/settings/runtime") {
       if (req.method !== "GET") return allow("GET");
@@ -251,11 +279,35 @@ export function createChatServer(
       store.removeReference(sessionId, references[2]);
       return json(store.references(sessionId));
     }
-    const route = /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/sources)?$/.exec(
-      path,
-    );
+    const route =
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources)?$/.exec(
+        path,
+      );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/checkpoint") {
+      if (req.method !== "POST") return allow("POST");
+      const body = await readBody(req);
+      if(res.destroyed) return;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      res.once("close", abort);
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(totalTimeoutMs)]);
+        return json(
+          await checkpoints.run(
+            store,
+            store.get(session.id) ?? session,
+            body,
+            providers,
+            stateDirectory,
+            signal,
+          ),
+        );
+      } finally {
+        res.off("close", abort);
+      }
+    }
     if (session && store && route?.[2] === "/sources") {
       if (req.method === "GET") return json(store.sources(session.id));
       if (req.method !== "PUT") return allow("GET, PUT");
@@ -305,7 +357,7 @@ export function createChatServer(
         !isLimits(body.limits)
       )
         throw new RequestError(400, "invalid_preview");
-      const state = await loadSectionState(store, session.sectionId);
+      const state = await memoryFor(store, session.sectionId);
       return json(contextFor(store, store.get(session.id) ?? session, body.message, state, body.limits));
     }
     if (session && store && !route?.[2]) {
@@ -344,10 +396,10 @@ export function createChatServer(
     const { message } = body;
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
-    const state = session && store ? await loadSectionState(store, session.sectionId) : undefined;
+    const state = session && store ? await memoryFor(store, session.sectionId) : undefined;
     if (res.destroyed) return;
     if (session && store) session = store.get(session.id);
-    const context = session && store ? contextFor(store, session, message, state) : undefined;
+    const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
@@ -392,6 +444,7 @@ export function createChatServer(
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-store",
         "x-request-id": id,
+        ...(session?.sectionId && context && { "x-ags-memory-use": JSON.stringify(context.memoryUse) }),
         ...(context?.stateStale && { "x-ags-section-state": "stale" }),
       });
       res.flushHeaders();

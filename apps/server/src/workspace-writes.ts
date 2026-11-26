@@ -123,6 +123,7 @@ export async function workspaceWrite(
   action: string,
   body: Record<string, unknown>,
   privateDir: string,
+  beforePublish?: () => void,
 ) {
   if (!grant || !privateDir) throw new WorkspaceError(403, "write_disabled");
   if (typeof body.path !== "string" || body.path.length > 4096 || body.root !== root.path)
@@ -187,6 +188,7 @@ export async function workspaceWrite(
           closeSync(fd);
         }
       }
+      beforePublish?.();
       // No event-loop yield during the final check and publication, including across projects sharing a folder.
       const temp = join(parent.target, `.ags-stage-${randomUUID()}`);
       receipt = store.beginApprovedWrite(project, operation, path);

@@ -66,7 +66,9 @@ export function SectionStateSource({
             disabled={busy || (path === section.statePath && file.version === section.stateVersion)}
             onClick={() => void save(file.version)}
           >
-            현재 파일을 상태로 지정
+            {path === section.statePath && file.version !== section.stateVersion
+              ? "현재 버전으로 상태 갱신"
+              : "현재 파일을 상태로 지정"}
           </button>
         ) : (
           <small>
@@ -84,7 +86,34 @@ export function SectionStateSource({
 }
 
 export function SectionMemorySetting({ token }: { token: string }) {
-  const path = "/api/settings/section-memory";
+  return (
+    <>
+      <MemoryToggle
+        token={token}
+        path="/api/settings/section-memory"
+        label="섹션 기억 참조"
+        detail="지정한 상태 파일과 최근 구간 요약을 같은 섹션의 대화에 포함합니다."
+      />
+      <MemoryToggle
+        token={token}
+        path="/api/settings/memory-update"
+        label="작업기억 갱신"
+        detail="대화에서 구간 요약 초안을 만들고 검토한 내용을 작업 폴더에 저장할 수 있습니다."
+      />
+    </>
+  );
+}
+function MemoryToggle({
+  token,
+  path,
+  label,
+  detail,
+}: {
+  token: string;
+  path: string;
+  label: string;
+  detail: string;
+}) {
   const [enabled, setEnabled] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -99,7 +128,7 @@ export function SectionMemorySetting({ token }: { token: string }) {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [token]);
+  }, [token, path]);
   async function toggle() {
     setBusy(true);
     setError("");
@@ -121,9 +150,9 @@ export function SectionMemorySetting({ token }: { token: string }) {
           disabled={enabled === undefined || busy}
           onChange={() => void toggle()}
         />
-        섹션 기억 참조
+        {label}
       </label>
-      <p>모든 섹션에 적용합니다. 켜면 지정한 상태 파일을 장기기억 위치에 포함합니다.</p>
+      <p>{detail}</p>
       {error && <p role="alert">{error}</p>}
     </>
   );

@@ -93,3 +93,9 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.
 
 `GET /api/settings/section-memory`는 `{enabled}`를 반환하며 PUT으로 같은 형식을 저장한다. 기본값은 true다. 매 전송 시 지정한 파일의 버전을 검사한다. 버전 일치 시 미리보기와 공급자 요청에서 수동 장기기억 뒤에 독립된 user 메시지로 배치한다. 예산이 부족하면 상태 문서를 통째로 제외한다. 파일 변경·삭제 등으로 원본을 검증할 수 없는 경우 미리보기의 stateStale이 true이고 실제 전송 응답에는 `x-ags-section-state: stale`가 포함된다.
+
+### 구간 요약
+
+`POST /api/sessions/{id}/checkpoint`에 `{action:"draft",provider,model}`을 보내면 선택 모델과 승인형 작업 폴더를 확인한 뒤, 이 세션의 미기록 완료 턴을 오래된 순으로 최대 8개 사용한다. 생성 결과에는 편집할 summary, 출처 발췌(sources), 대상 파일(path), 원본 턴 식별자(first, last), 폴더 연결 식별값(binding)이 있다. 실패·초안 취소는 원본 턴과 진행 위치를 보존한다. `{action:"save",approved:true,first,last,binding,summary}`로 승인한다. 생성된 파일과 일치하는 저장 기록이 있어야 해당 구간을 처리한 것으로 본다.
+
+`GET/PUT /api/settings/memory-update`는 독립적인 전역 갱신 토글이며 `{enabled}`를 사용한다. 참조가 켜졌을 때 최근 승인된 파일 최대 3개의 버전을 확인하고 각각 독립된 memory 블록으로 예산에 포함한다. 미리보기의 memoryUse와 섹션 채팅 응답 헤더 x-ags-memory-use에는 상태 파일 포함 여부와 포함·원본 변경·예산 제외 건수가 있다. 각 요약 원본을 수정하거나 삭제하면 해당 버전은 입력에서 빠진다.

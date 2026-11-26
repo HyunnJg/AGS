@@ -731,3 +731,8 @@ header h2 {
 .file-write .removed { background:#f6e7e5; }
 .file-write .added { background:#e3f0e4; }
 .index-links { display:grid; gap:.25rem; }
+.checkpoint-editor { margin: .3rem 0; font-size: .88rem; }
+.checkpoint-editor summary { cursor: pointer; }
+.checkpoint-editor fieldset { display: grid; gap: .4rem; margin: .4rem 0; border: 0; padding: 0; }
+.checkpoint-editor textarea { width: 100%; }
+.checkpoint-editor small, .checkpoint-editor output { overflow-wrap: anywhere; }
