@@ -1,3 +1,4 @@
+import type { CallCapture } from "./capture.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
 export const anthropicVersion = "2026-10-21";
@@ -13,7 +14,7 @@ export function anthropicPayload(model: string, input: Message[], maxTokens: num
   return { model, system, messages, max_tokens: maxTokens, stream: true };
 }
 
-export async function* anthropicReply(events: AsyncIterable<string>) {
+export async function* anthropicReply(events: AsyncIterable<string>, capture?: CallCapture) {
   let started = false;
   let hasText = false;
   let reason: string | undefined;
@@ -23,6 +24,13 @@ export async function* anthropicReply(events: AsyncIterable<string>) {
     if (event.type === "message_start") {
       if (started) throw new Error("duplicate_message_start");
       started = true;
+    }
+    if (capture && (event.type === "message_start" || event.type === "message_delta")) {
+      const usage = event.type === "message_start" ? event.message?.usage : event.usage;
+      capture.recordTokens("uncachedInputTokens", usage?.input_tokens);
+      capture.recordTokens("cachedInputTokens", usage?.cache_read_input_tokens);
+      capture.recordTokens("cacheWriteTokens", usage?.cache_creation_input_tokens);
+      capture.recordTokens("outputTokens", usage?.output_tokens);
     }
     if (event.type === "message_delta" && event.delta?.stop_reason) reason = event.delta.stop_reason;
     if (event.type === "message_stop") {

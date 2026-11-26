@@ -1,3 +1,4 @@
+import type { CallCapture } from "./capture.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
 export function geminiPayload(messages: Message[], outputBudget?: number | null) {
@@ -21,11 +22,20 @@ export function geminiPayload(messages: Message[], outputBudget?: number | null)
   };
 }
 
-export async function* geminiReply(events: AsyncIterable<string>) {
+export async function* geminiReply(events: AsyncIterable<string>, capture?: CallCapture) {
   let finished = false;
   let hasText = false;
   for await (const data of events) {
     const chunk = JSON.parse(data);
+    const usage = chunk.usageMetadata;
+    if (usage && capture) {
+      capture.recordTokens("inputTokens", usage.promptTokenCount);
+      capture.recordTokens("candidateTokens", usage.candidatesTokenCount);
+      capture.recordTokens("reasoningTokens", usage.thoughtsTokenCount);
+      capture.recordTokens("cachedInputTokens", usage.cachedContentTokenCount);
+      capture.recordTokens("toolPromptTokens", usage.toolUsePromptTokenCount);
+      capture.recordTokens("totalTokens", usage.totalTokenCount);
+    }
     const blocked = chunk.promptFeedback?.blockReason;
     if (chunk.error || (blocked && blocked !== "BLOCK_REASON_UNSPECIFIED"))
       throw new Error("gemini_blocked_or_failed");

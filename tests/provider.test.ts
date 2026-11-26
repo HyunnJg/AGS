@@ -54,7 +54,8 @@ test(
         res.writeHead(200, { "content-type": "text/event-stream" });
         if (mode === "burst") {
           res.write('data: {"choices":[{"delta":{"content":"가"}}]}\n\n'.repeat(200));
-          res.end("data: [DONE]\n\n");
+          res.write(`: ${"x".repeat(65536)}\n\n`);
+          res.end('data: {"choices":[],"usage":{"total_tokens":250}}\n\ndata: [DONE]\n\n');
           return;
         }
         const frame = Buffer.from(
@@ -235,6 +236,9 @@ test(
     writes.mock.resetCalls();
     assert.match(await (await send("burst")).text(), /event: done/);
     assert.equal(store.turns(a.id).at(-1)?.reply, "가".repeat(200));
+    const burst = store.callDetails()[0];
+    assert.ok(burst?.bodyLimited && !burst.body.includes("total_tokens"));
+    assert.deepEqual(burst.usage, {totalTokens: 250});
     assert.ok(writes.mock.callCount() > 0 && writes.mock.callCount() < 20);
     for (const [failure, expected] of [
       ["401", "provider_auth"],

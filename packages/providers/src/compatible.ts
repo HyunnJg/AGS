@@ -71,10 +71,19 @@ async function* eventData(body: ReadableStream<Uint8Array>, onActivity?: () => v
   }
 }
 
-async function* compatibleReply(events: AsyncIterable<string>) {
+async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture) {
   for await (const data of events) {
     if (data.trim() === "[DONE]") return;
     const chunk = JSON.parse(data);
+    const usage = chunk.usage;
+    if (usage && capture) {
+      capture.recordTokens("inputTokens", usage.prompt_tokens);
+      capture.recordTokens("outputTokens", usage.completion_tokens);
+      capture.recordTokens("totalTokens", usage.total_tokens);
+      capture.recordTokens("cachedInputTokens", usage.prompt_tokens_details?.cached_tokens);
+      capture.recordTokens("cacheWriteTokens", usage.prompt_tokens_details?.cache_write_tokens);
+      capture.recordTokens("reasoningTokens", usage.completion_tokens_details?.reasoning_tokens);
+    }
     const choice = chunk.choices?.[0];
     if (chunk.error || choice?.finish_reason === "error") throw new ProviderError("provider_failed");
     const content = choice?.delta?.content;
@@ -175,7 +184,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         throw await responseError(provider, response, capture);
       }
       const events = eventData(response.body, onActivity, capture);
-      yield* reply(events);
+      yield* reply(events, capture);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof ProviderError) throw error;

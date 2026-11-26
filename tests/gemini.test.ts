@@ -29,7 +29,10 @@ test("Gemini 전송은 지침과 역할·파트 순서를 보존하고 표시할
       candidates: [{ finishReason: "FINISH_REASON_UNSPECIFIED" }],
     }) +
     textFrame +
-    finalFrame;
+    finalFrame + frame({ usageMetadata: {
+      promptTokenCount: 18, cachedContentTokenCount: 0, candidatesTokenCount: 12,
+      thoughtsTokenCount: 9, toolUsePromptTokenCount: 3, totalTokenCount: "bad", other: "ignore",
+    } });
   const adapters = configureProviders(env, async (url, init) => {
     assert.equal(
       url,
@@ -82,6 +85,10 @@ test("Gemini 전송은 지침과 역할·파트 순서를 보존하고 표시할
   };
   await run();
   assert.equal(logs[0]?.answer, "답변");
+  assert.deepEqual(logs[0]?.usage, {
+    inputTokens: 18, cachedInputTokens: 0, candidateTokens: 12, reasoningTokens: 9,
+    toolPromptTokens: 3, totalTokens: 42,
+  });
   assert.ok(logs[0]?.body.includes("usageMetadata"));
   assert.equal(logs[0]?.request?.messageCount, messages.length);
   for (const bad of [
@@ -94,8 +101,10 @@ test("Gemini 전송은 지침과 역할·파트 순서를 보존하고 표시할
     await assert.rejects(run(), /provider_failed/);
     assert.equal(logs.at(-1)?.status, "failed");
   }
-  wire = textFrame + frame({ candidates: [{ finishReason: "MAX_TOKENS" }] });
+  wire = textFrame + frame({ candidates: [{ finishReason: "MAX_TOKENS" }],
+    usageMetadata: { promptTokenCount: -1, thoughtsTokenCount: 0.5, totalTokenCount: 2 ** 53 } });
   await run();
+  assert.equal(logs.at(-1)?.usage, undefined);
   for (const [code, error] of [
     [403, /provider_auth/],
     [429, /provider_limit/],

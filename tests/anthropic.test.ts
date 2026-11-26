@@ -7,7 +7,9 @@ import type { CallLog } from "../packages/contracts/src/calls.ts";
 const env = { AGS_ANTHROPIC_API_KEY: "claude-fixture-key", AGS_OPENAI_API_KEY: "fixture-other-key" };
 const target = { provider: "anthropic", model: "fixture-model" } as const;
 const complete = [
-  { type: "message_start" },
+  { type: "message_start", message: { usage: {
+    input_tokens: 8, cache_read_input_tokens: 48, cache_creation_input_tokens: 0, output_tokens: 1,
+  } } },
   { type: "ping" },
   { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "internal" } },
   { type: "content_block_delta", delta: { type: "text_delta", text: "본문" } },
@@ -74,12 +76,16 @@ test("Claude는 전용 키·버전·출력 예산을 보내고 완결된 텍스�
   await run();
   assert.equal(logs.at(-1)?.answer, "본문");
   assert.equal(logs.at(-1)?.request?.maxTokens, 4096);
+  assert.deepEqual(logs.at(-1)?.usage, {
+    uncachedInputTokens: 8, cachedInputTokens: 48, cacheWriteTokens: 0, outputTokens: 4,
+  });
   budget = 1200;
   for (const suffix of [[], [{ type: "error" }]]) {
     events = [...complete.slice(0, 4), ...suffix];
     await assert.rejects(run(), /provider_failed/);
     assert.equal(logs.at(-1)?.answer, "본문");
     assert.equal(logs.at(-1)?.status, "failed");
+    assert.equal(logs.at(-1)?.usage?.outputTokens, 1);
   }
   for (const [code, expected] of [
     [401, /provider_auth/],

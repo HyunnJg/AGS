@@ -300,13 +300,13 @@ export class SessionStore {
       blockUsage: budget.blockUsage,
     };
     const capture = new CallCapture(kind, selection, session, (log) => {
-      const { request, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
+      const { request, usage, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
       this.db
         .prepare("INSERT INTO call_log VALUES(?,?,?)")
         .run(
           log.id,
           JSON.stringify(summary),
-          JSON.stringify({ request, contextBudget, headers, body, bodyLimited, answer, answerLimited }),
+          JSON.stringify({ request, usage, contextBudget, headers, body, bodyLimited, answer, answerLimited }),
         );
     });
     this.protectCall?.(capture);
