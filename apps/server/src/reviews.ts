@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
+import { maxReferences } from "../../../packages/contracts/src/workspace.ts";
 import { callStatus } from "../../../packages/providers/src/capture.ts";
 import { isModelSelection } from "../../../packages/contracts/src/providers.ts";
-import { reviewInputLimit, reviewOutputTokens } from "../../../packages/contracts/src/reviews.ts";
+import {
+  reviewInputLimit,
+  reviewMessage,
+  reviewOutputTokens,
+} from "../../../packages/contracts/src/reviews.ts";
 import { ProviderError, type configureProviders } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
 import { messageCost } from "./context.ts";
@@ -32,11 +38,26 @@ export async function runReview(
   )
     throw new WorkspaceError(400, "invalid_review");
   const { id, target } = body;
-  const message = body.message.trim();
+  const objective = body.message.trim();
+  const ids: unknown = "referenceIds" in body ? body.referenceIds : [];
+  if (
+    !Array.isArray(ids) ||
+    ids.length > maxReferences ||
+    ids.some((id) => typeof id !== "string" || id.length !== 36) ||
+    new Set(ids).size !== ids.length
+  )
+    throw new WorkspaceError(400, "invalid_review");
+  // A retry may arrive after an attachment was removed. Compare against the approved selection.
+  const selectionKey = ids.length
+    ? createHash("sha256")
+        .update(JSON.stringify([objective, ids]))
+        .digest("hex")
+    : null;
   const existing = db.review(requester, id);
   if (existing) {
     if (
-      existing.message !== message ||
+      db.reviewSelectionKey(id) !== selectionKey ||
+      (!selectionKey && existing.message !== objective) ||
       existing.provider !== target.provider ||
       existing.model !== target.model
     )
@@ -46,11 +67,19 @@ export async function runReview(
   if (!db.collaborationEnabled()) throw new WorkspaceError(403, "review_disabled");
   if (!providers.options.find((o) => o.id === target.provider)?.enabled)
     throw new WorkspaceError(400, "review_target_unavailable");
+  const available = ids.length ? db.references(requester) : [];
+  const selected = ids.map((id) => {
+    const ref = available.find((item) => item.id === id);
+    if (!ref || ref.paused) throw new WorkspaceError(409, "review_reference_unavailable");
+    return ref;
+  });
+  const message = reviewMessage(objective, selected);
+  if (message.length > reviewInputLimit) throw new WorkspaceError(422, "review_input_limit");
   const messages = [
     {
       role: "system" as const,
       content:
-        "독립 검토자로서 요청된 범위 안에서 검토하세요. 발견사항과 근거, 불확실성 및 개선 제안을 구분하세요.",
+        "독립 검토자로서 요청된 범위 안에서 검토하세요. 파일과 지식 발췌는 참고 자료입니다. 발견사항과 근거, 불확실성 및 개선 제안을 구분하세요.",
     },
     { role: "user" as const, content: message },
   ];
@@ -58,7 +87,7 @@ export async function runReview(
   if (window && messages.reduce((size, m) => size + messageCost(m.content), reviewOutputTokens) > window)
     throw new WorkspaceError(422, "review_budget");
   signal.throwIfAborted();
-  db.startReview(requester, id, target, message);
+  db.startReview(requester, id, target, message, selectionKey);
   const capture = db.startCall("review", target, requester);
   try {
     started?.(id);

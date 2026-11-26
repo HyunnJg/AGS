@@ -11,6 +11,8 @@ const workspaceMessages: Record<string, string> = {
   source_unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
   knowledge_disabled: "설정 → 토글형 모듈에서 외부 지식 참조를 켜면 지식 발췌를 추가할 수 있습니다.",
   reference_kind_conflict: "이 범위는 이미 다른 방식으로 첨부했습니다. 첨부 자료에서 뺀 뒤 다시 선택하세요.",
+  review_reference_unavailable: "선택한 자료가 삭제됐거나 지식 참조가 꺼졌습니다. 첨부 목록을 다시 확인하세요.",
+  review_input_limit: "발췌를 포함한 검토 요청을 8,000자 이내로 줄여 주세요.",
   invalid_review: "보낼 내용과 검토 모델을 확인하세요.",
   review_budget: "검토 내용이 대상 모델의 입력 예산을 넘습니다. 내용을 줄여 주세요.",
   review_busy: "이 대화에서 요청한 검토가 진행 중입니다.",
