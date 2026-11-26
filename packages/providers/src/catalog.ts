@@ -7,59 +7,81 @@ export function createCatalog(
 ) {
   const cache = new Map<ProviderId, { expires: number; models: CatalogModel[] }>();
   const pending = new Map<ProviderId, Promise<CatalogModel[]>>();
-  async function load(provider: ProviderId, capture?: CallCapture) {
+  async function load(provider: ProviderId, startCapture?: () => CallCapture | undefined) {
     const signal = AbortSignal.timeout(8000);
-    try {
-      const { url, key } = endpoint(provider);
-      capture?.protect(key);
-      if (!url) throw new Error("provider_unavailable");
-      const response = await send(new URL("models", url).href, {
-        redirect: "error",
-        signal,
-        headers: { accept: "application/json", ...(key && { authorization: `Bearer ${key}` }) },
-      });
-      capture?.response(response);
-      if (!response.ok || !response.body) {
-        if (capture) await capture.errorBody(response.body);
-        else await response.body?.cancel();
-        throw new Error("catalog_unavailable");
+    const { url, key } = endpoint(provider);
+    const models = new Map<string, CatalogModel>();
+    const seen = new Set<string>();
+    let pageToken = "";
+    let size = 0;
+    do {
+      const capture = startCapture?.();
+      try {
+        capture?.protect(key);
+        if (!url) throw new Error("provider_unavailable");
+        const path = new URL("models", url);
+        const native = provider === "gemini";
+        if (native) path.searchParams.set("pageSize", "1000");
+        if (pageToken) path.searchParams.set("pageToken", pageToken);
+        const response = await send(path.href, {
+          redirect: "error",
+          signal,
+          headers: {
+            accept: "application/json",
+            ...(key && (native ? { "x-goog-api-key": key } : { authorization: `Bearer ${key}` })),
+          },
+        });
+        capture?.response(response);
+        if (!response.ok || !response.body) {
+          if (capture) await capture.errorBody(response.body);
+          else await response.body?.cancel();
+          throw new Error("catalog_unavailable");
+        }
+        const buffers: Uint8Array[] = [];
+        for await (const chunk of response.body) {
+          capture?.bytes(chunk);
+          size += chunk.byteLength;
+          if (size > 8 * 1024 * 1024) throw new Error("catalog_too_large");
+          buffers.push(chunk);
+        }
+        const payload = JSON.parse(Buffer.concat(buffers).toString("utf8"));
+        const items = native ? payload?.models : payload?.data;
+        if (!Array.isArray(items)) throw new Error("invalid_catalog");
+        for (const item of items) {
+          if (
+            native &&
+            !(
+              Array.isArray(item?.supportedGenerationMethods) &&
+              item.supportedGenerationMethods.includes("generateContent") &&
+              typeof item.name === "string" &&
+              item.name.startsWith("models/")
+            )
+          )
+            continue;
+          const id = native ? item.name.slice(7) : item?.id;
+          if (!isModelSelection({ provider, model: id }) || models.has(id) || (key && id.includes(key)))
+            continue;
+          const label = native ? item.displayName : item.name;
+          const name = typeof label === "string" && !(key && label.includes(key)) ? label.slice(0, 256) : id;
+          // Gemini publishes separate input/output limits, not a combined context window.
+          const contextLength =
+            !native && Number.isSafeInteger(item.context_length) && item.context_length > 0
+              ? item.context_length
+              : undefined;
+          models.set(id, { id, name, ...(contextLength && { contextLength }) });
+        }
+        pageToken = native ? (payload.nextPageToken ?? "") : "";
+        if (typeof pageToken !== "string" || seen.has(pageToken)) throw new Error("invalid_catalog_cursor");
+        seen.add(pageToken);
+        capture?.finish("completed");
+      } catch (error) {
+        capture?.finish(callStatus(signal));
+        throw error;
       }
-      const buffers: Uint8Array[] = [];
-      let size = 0;
-      for await (const chunk of response.body) {
-        capture?.bytes(chunk);
-        size += chunk.byteLength;
-        if (size > 8 * 1024 * 1024) throw new Error("catalog_too_large");
-        buffers.push(chunk);
-      }
-      const payload = JSON.parse(Buffer.concat(buffers).toString("utf8"));
-      if (!Array.isArray(payload?.data)) throw new Error("invalid_catalog");
-      const models = new Map<string, CatalogModel>();
-      for (const item of payload.data) {
-        if (
-          !isModelSelection({ provider, model: item?.id }) ||
-          models.has(item.id) ||
-          (key && item.id.includes(key))
-        )
-          continue;
-        const name =
-          typeof item.name === "string" && !(key && item.name.includes(key))
-            ? item.name.slice(0, 256)
-            : item.id;
-        const contextLength =
-          Number.isSafeInteger(item.context_length) && item.context_length > 0
-            ? item.context_length
-            : undefined;
-        models.set(item.id, { id: item.id, name, contextLength });
-      }
-      const result = [...models.values()].sort((a, b) => a.name.localeCompare(b.name));
-      cache.set(provider, { models: result, expires: Date.now() + 300_000 });
-      capture?.finish("completed");
-      return result;
-    } catch (e) {
-      capture?.finish(callStatus(signal));
-      throw e;
-    }
+    } while (pageToken);
+    const result = [...models.values()].sort((a, b) => a.name.localeCompare(b.name));
+    cache.set(provider, { models: result, expires: Date.now() + 300_000 });
+    return result;
   }
   async function models(provider: ProviderId, refresh = false, startCapture?: () => CallCapture | undefined) {
     if (provider === "mock") return [];
@@ -67,7 +89,7 @@ export function createCatalog(
     if (!refresh && current && current.expires > Date.now()) return current.models;
     const active = pending.get(provider);
     if (active) return active;
-    const request = load(provider, startCapture?.()).finally(() => pending.delete(provider));
+    const request = load(provider, startCapture).finally(() => pending.delete(provider));
     pending.set(provider, request);
     return request;
   }

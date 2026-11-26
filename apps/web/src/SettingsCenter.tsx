@@ -94,6 +94,7 @@ function ModelList({
   }
   return (
     <div className="catalog">
+      {provider === "gemini" && <small>Gemini Developer API의 콘텐츠 생성 모델입니다. 텍스트 응답을 지원하는 모델을 선택하세요.</small>}
       {provider === "openai" && <small>계정에서 사용할 수 있는 모델 목록입니다. 텍스트 채팅에는 Chat Completions 지원 모델을 선택하세요.</small>}
       <label>
         모델 검색

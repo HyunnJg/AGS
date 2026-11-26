@@ -19,6 +19,28 @@ test(
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
     const fake = createServer(async (req, res) => {
+      if (req.url?.startsWith("/gemini/")) {
+        assert.equal(req.headers["x-goog-api-key"], "gemini-ui-fixture");
+        assert.equal(req.headers.authorization, undefined);
+        if (req.url === "/gemini/v1beta/models?pageSize=1000") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ models: [{name:"models/gemini-fixture", displayName:"Gemini Fixture", supportedGenerationMethods:["generateContent"]}]}));
+          return;
+        }
+        assert.equal(req.url, "/gemini/v1beta/models/gemini-fixture:streamGenerateContent?alt=sse");
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const request = JSON.parse(Buffer.concat(chunks).toString());
+        const review = request.systemInstruction.parts[0].text.startsWith("독립 검토자");
+        if (review) {
+          assert.deepEqual(request.contents, [{role:"user", parts:[{text:"선택한 문단 검토"}]}]);
+          assert.equal(request.generationConfig.maxOutputTokens, 1200);
+        }
+        const text = review ? "선택 문단 검토 완료" : "Gemini 대화 응답";
+        const frame = { candidates:[{content:{role:"model", parts:[{text}]}, finishReason:"STOP"}],usageMetadata:{totalTokenCount:29} };
+        res.writeHead(200, {"content-type":"text/event-stream"}).end(`data: ${JSON.stringify(frame)}\n\n`);
+        return;
+      }
       if (req.url?.startsWith("/openai/")) {
         assert.equal(req.headers.authorization, "Bearer openai-ui-fixture");
         if (req.url === "/openai/v1/models") {
@@ -108,6 +130,8 @@ test(
           AGS_OPENROUTER_API_KEY: "",
           AGS_OPENROUTER_MODEL: "",
           AGS_TEST_PROVIDER_PORT: String(fake.address().port),
+          AGS_GEMINI_API_KEY: "",
+          AGS_GEMINI_MODEL: "",
           AGS_OPENAI_API_KEY: "",
           AGS_OPENAI_MODEL: "",
           AGS_CUSTOM_MODEL: "",
@@ -807,6 +831,40 @@ test(
     assert.ok(reviewLog.body.includes("[DONE]"));
     assert.ok(reviewLog.body.includes('"total_tokens":24'));
     assert.ok(!JSON.stringify(directLogs).includes("openai-ui-fixture"));
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await page.getByRole("button", { name: "Google Gemini", exact: true }).click();
+    await page.getByLabel("API 키", {exact:true}).fill("gemini-ui-fixture");
+    await page.getByLabel("기본 모델 ID").fill("gemini-fixture");
+    await page.getByRole("button", {name:"연결 저장"}).click();
+    await page.getByRole("button", {name:/Gemini Fixture.*gemini-fixture/i}).click();
+    await page.getByRole("button", {name:"gemini-fixture 즐겨찾기"}).click();
+    await page.locator('.pin[aria-pressed="true"]').waitFor();
+    await page.getByRole("button", {name:"적용",exact:true}).click();
+    await page.getByRole("dialog").waitFor({state:"hidden"});
+    assert.equal(await quick.inputValue(), JSON.stringify(["gemini","gemini-fixture"]));
+    await page.getByLabel("메시지", {exact:true}).fill("Gemini 채팅 확인");
+    await page.getByRole("button", {name:"전송"}).click();
+    await page.getByText("Gemini 대화 응답", {exact:true}).waitFor();
+    await switchModel("openai", "ui/openai-text");
+    await editor.getByRole("combobox").selectOption(JSON.stringify(["gemini", "gemini-fixture"]));
+    await editor.getByLabel("검토 모델에 보낼 내용").fill("선택한 문단 검토");
+    const approved = page.waitForResponse(r => r.url().endsWith("/review") && r.request().method() === "POST");
+    await editor.getByRole("button", {name:"승인하고 검토 요청"}).click();
+    const independent = await (await approved).json();
+    assert.equal(independent.provider, "gemini");
+    assert.equal(independent.reply, "선택 문단 검토 완료");
+    await editor.getByText("검토 이력 2건", {exact:true}).click();
+    await editor.getByRole("button", {name:/선택한 문단 검토.*대화 열기/}).click();
+    await page.waitForFunction(id => sessionStorage.getItem("ags-session") === id, independent.reviewer);
+    await page.getByText("선택 문단 검토 완료", {exact:true}).waitFor();
+    const nativeLogs = await (await page.request.get(`${base}/api/call-logs/export`, {headers})).json();
+    for (const kind of ["catalog", "chat", "review"])
+      assert.ok(nativeLogs.some(row => row.provider === "gemini" && row.kind === kind && row.status === "completed"));
+    const nativeReview = nativeLogs.find(row => row.provider === "gemini" && row.kind === "review");
+    assert.equal(nativeReview.answer, independent.reply);
+    assert.equal(nativeReview.request.maxTokens, 1200);
+    assert.match(nativeReview.body, /usageMetadata/);
+    assert.ok(!JSON.stringify(nativeLogs).includes("gemini-ui-fixture"));
     assert.deepEqual(pageErrors, []);
   },
 );

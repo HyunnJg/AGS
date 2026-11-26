@@ -9,7 +9,7 @@ import {
 } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, customEndpoint, officialBaseUrls } from "../../../packages/providers/src/compatible.ts";
 
-const ids = ["custom", "openrouter", "openai"] as const;
+const ids = ["custom", "openrouter", "openai", "gemini"] as const;
 const windows = process.platform === "win32";
 
 interface RecordData {
