@@ -187,6 +187,15 @@ test(
     assert.equal((await call(langPath, "PUT", {language: "other", previous: "auto"})).status, 400);
     assert.equal((await call(langPath, "PUT", {language: "ja", previous: "auto"})).status, 200);
     assert.equal((await call(langPath, "PUT", {language: "ko", previous: "auto"})).status, 409);
+    const presetsPath = "/api/settings/presets";
+    const definition = { name: "사료 검토", instructions: "Distinguish evidence from inference." };
+    const registered = await (await call(presetsPath, "POST", definition)).json();
+    assert.deepEqual(await (await call(presetsPath, "POST", definition)).json(), registered);
+    assert.deepEqual(await (await call(presetsPath, "GET")).json(), [{id: registered.id, name: definition.name}]);
+    assert.equal((await call(presetsPath, "POST", {...definition, instructions:" "})).status, 400);
+    assert.equal((await call(presetsPath, "POST", {...definition, instructions:"new"})).status, 409);
+    assert.equal((await call(path, "PATCH", {preset: "custom-00000000-0000-0000-0000-000000000000"})).status, 404);
+    assert.equal((await call(path, "PATCH", {preset: registered.id})).status, 200);
     const callsBefore = requests.length;
     const preview = await (await call(`${path}/context-preview`, "POST", { message: "다음", limits })).json();
     assert.equal(requests.length, callsBefore);
@@ -204,6 +213,7 @@ test(
     );
     assert.match(preview.messages[0].content, /한글로 작성/);
     assert.match(preview.messages[0].content, /일본어로 답하세요/);
+    assert.ok(preview.messages[0].content.includes(definition.instructions));
     assert.match(await (await send("다음")).text(), /event: done/);
     assert.deepEqual(requests.at(-1)?.messages, preview.messages);
     assert.equal(requests.at(-1)?.max_tokens, 128);

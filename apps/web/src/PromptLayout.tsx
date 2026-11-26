@@ -6,9 +6,10 @@ import {
   maxPromptLength,
   maxSourceLength,
   type PromptSettings,
+  type PresetContent,
   type SessionSources,
 } from "../../../packages/contracts/src/context.ts";
-import type { Session } from "../../../packages/contracts/src/sessions.ts";
+import { isBuiltinPreset, type Session } from "../../../packages/contracts/src/sessions.ts";
 import { api, SettingsConflict } from "./api.ts";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : "저장할 수 없습니다.");
@@ -112,6 +113,8 @@ export function SourceEditor({ token, id, onSaved }: { token: string; id: string
 
 export function SharedPrompt({ token, session }: { token: string; session?: Session }) {
   const path = "/api/settings/prompt";
+  const selectedPreset = session?.preset ?? "general";
+  const [content, setContent] = useState<PresetContent>();
   const [stored, setStored] = useState<PromptSettings>();
   const [prompt, setPrompt] = useState("");
   const [order, setOrder] = useState([...defaultOrder]);
@@ -121,10 +124,15 @@ export function SharedPrompt({ token, session }: { token: string; session?: Sess
   const [compare, setCompare] = useState(false);
   useEffect(() => {
     let alive = true;
-    api(token, path)
-      .then((r) => r.json())
-      .then((data) => {
+    Promise.all([
+      api(token, path).then((r) => r.json()),
+      isBuiltinPreset(selectedPreset)
+        ? selectedPreset
+        : api(token, `/api/settings/presets/${selectedPreset}`).then((r) => r.json()),
+    ])
+      .then(([data, definition]) => {
         if (alive) {
+          setContent(definition);
           setStored(data);
           setPrompt(data.prompt);
           setOrder(data.order);
@@ -136,7 +144,7 @@ export function SharedPrompt({ token, session }: { token: string; session?: Sess
     return () => {
       alive = false;
     };
-  }, [token]);
+  }, [token, selectedPreset]);
   function move(from: number, to: number) {
     const next = order.slice();
     const item = next.splice(from, 1)[0];
@@ -187,7 +195,7 @@ export function SharedPrompt({ token, session }: { token: string; session?: Sess
       </label>
       <details className="context-preview">
         <summary>고정 지침 미리보기</summary>
-        <pre>{systemText(prompt, session?.preset ?? "general", stored?.responseLanguage)}</pre>
+        <pre>{content && systemText(prompt, content, stored?.responseLanguage)}</pre>
       </details>
       <strong>컨텍스트 주입 순서</strong>
       <small>

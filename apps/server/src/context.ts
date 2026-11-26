@@ -2,6 +2,7 @@ import type { FileReference } from "../../../packages/contracts/src/workspace.ts
 import {
   systemText,
   type ResponseLanguage,
+  type PresetContent,
   defaultOrder,
   emptySources,
   blockNames,
@@ -12,7 +13,6 @@ import {
   type ContextPreview,
   type Message,
 } from "../../../packages/contracts/src/context.ts";
-import type { Preset } from "../../../packages/contracts/src/sessions.ts";
 
 export function messageCost(text: string) {
   return Buffer.byteLength(text, "utf8") + 8;
@@ -20,7 +20,7 @@ export function messageCost(text: string) {
 
 // UTF-8 bytes plus framing is a conservative estimate for an unknown model tokenizer.
 export function assembleContext(
-  preset: Preset,
+  preset: PresetContent,
   prompt: string,
   limits: ContextLimits,
   history: Message[],

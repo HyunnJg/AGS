@@ -110,6 +110,8 @@ export async function api(
       if (error === "invalid_connection") throw new Error("모델 ID와 API 키에 공백이나 허용되지 않는 문자가 있는지 확인하세요.");
       throw new Error("연결 설정을 저장하거나 읽지 못했습니다. 서버의 사용자 계정과 저장 권한을 확인하세요.");
     }
+    if (path === "/api/settings/presets" && res.status === 409)
+      throw new Error("같은 이름의 프리셋이 있습니다. 다른 이름으로 저장하세요.");
     if (res.status === 422)
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",

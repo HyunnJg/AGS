@@ -1,3 +1,4 @@
+import { PresetLibrary } from "./PresetLibrary.tsx";
 import { LanguageSetting } from "./LanguageSetting.tsx";
 import { CallLogs } from "./CallLogs.tsx";
 import { ProviderConnection } from "./ProviderConnection.tsx";
@@ -288,7 +289,7 @@ export function SettingsCenter({
         <section className="settings-detail">
           {section === "모델" ? (
             <fieldset disabled={saving} className="settings-tabs" aria-label="모델 설정 항목">
-              {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트", "정규식"].map((item) => (
+              {["공급사 · 모델", "컨텍스트 제어", "공용 프롬프트", "분야 프리셋", "정규식"].map((item) => (
                 <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>
                   {item}
                 </button>
@@ -297,7 +298,9 @@ export function SettingsCenter({
           ) : (
             <h3>{section === "고급 기능" ? "로컬 서버" : section}</h3>
           )}
-          {section === "모델" && tab === "정규식" ? (
+          {section === "모델" && tab === "분야 프리셋" ? (
+            <PresetLibrary token={token} />
+          ) : section === "모델" && tab === "정규식" ? (
             <DisplayRules token={token} onSaved={onRulesSaved} />
           ) : section === "모델" && tab === "공용 프롬프트" ? (
             <SharedPrompt token={token} session={session} />

@@ -20,9 +20,9 @@ import { defaultLimits, type ContextLimits } from "../../../packages/contracts/s
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
-import type { Preset, Session, Turn } from "../../../packages/contracts/src/sessions.ts";
+import { isBuiltinPreset, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 6;
+export const sessionSchemaVersion = 7;
 
 const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
@@ -138,6 +138,9 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 5) {
         this.db.exec("ALTER TABLE shared_prompt ADD COLUMN responseLanguage TEXT NOT NULL DEFAULT 'auto'; PRAGMA user_version=6");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 6) {
+        this.db.exec("CREATE TABLE custom_presets (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, instructions TEXT NOT NULL); PRAGMA user_version=7");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -585,6 +588,25 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET provider=?, model=? WHERE id=?")
       .run(selection.provider, selection.model, id);
+  }
+  customPresets() {
+    return this.db.prepare("SELECT id,name FROM custom_presets ORDER BY name,id").all() as unknown as CustomPresetSummary[];
+  }
+  presetContent(id: Preset) {
+    if (isBuiltinPreset(id)) return id;
+    const row = this.db.prepare("SELECT * FROM custom_presets WHERE id=?").get(id);
+    if (!row) throw new WorkspaceError(404, "unknown_preset");
+    return row as unknown as CustomPreset;
+  }
+  addPreset(name: string, instructions: string): CustomPreset {
+    const existing = this.db.prepare("SELECT * FROM custom_presets WHERE name=?").get(name);
+    if (existing) {
+      if (existing.instructions !== instructions) throw new WorkspaceError(409, "preset_name_taken");
+      return existing as unknown as CustomPreset;
+    }
+    const id: CustomPresetId = `custom-${randomUUID()}`;
+    this.db.prepare("INSERT INTO custom_presets VALUES(?,?,?)").run(id, name, instructions);
+    return { id, name, instructions };
   }
   setPreset(id: string, preset: Preset) {
     this.db.prepare("UPDATE sessions SET preset=? WHERE id=?").run(preset, id);
