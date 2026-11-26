@@ -927,7 +927,23 @@ test(
     const sample = list.find(
       (row) => row.kind === "chat" && row.provider === "custom" && row.status === "completed",
     );
-    await page.getByLabel("호출 선택").selectOption(sample.id);
+    const logPicker = page.getByLabel("호출 선택");
+    const filters = page.getByRole("group", { name: "호출 필터" });
+    const providerFilter = filters.getByLabel("공급자", { exact: true });
+    const kindFilter = filters.getByLabel("호출 종류");
+    const statusFilter = filters.getByLabel("종료 상태");
+    await providerFilter.selectOption("custom");
+    await kindFilter.selectOption("chat");
+    await statusFilter.selectOption("completed");
+    const matching = list.filter((row) => row.provider === "custom" && row.kind === "chat" && row.status === "completed");
+    assert.ok(matching.length > 0 && matching.length < list.length);
+    assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), matching.map(r => r.id));
+    await page.getByText(`${list.length}건 중 ${matching.length}건`, { exact: true }).waitFor();
+    await logPicker.selectOption(sample.id);
+    const refreshLogs = page.waitForResponse(r => r.url() === `${base}/api/call-logs` && r.request().method() === "GET");
+    await page.getByRole("button", { name: "목록 새로고침" }).click();
+    assert.equal((await refreshLogs).status(), 200);
+    assert.equal(await logPicker.inputValue(), sample.id);
     const detail = page.getByRole("region", { name: "호출 상세" });
     await detail.getByText(/HTTP 200/).waitFor();
     await detail.getByText(new RegExp(`메시지 ${statePayload.length}개`)).waitFor();
@@ -954,15 +970,25 @@ test(
       });
       assert.equal(row.contextBudget.estimatedInput, restored.estimatedInput);
       assert.deepEqual(row.contextBudget.blockUsage, restored.blockUsage);
-      if (Array.isArray(data))
+      if (Array.isArray(data)) {
+        assert.deepEqual(data.map(item => item.id), list.map(item => item.id));
         assert.ok(data.filter((item) => item.kind !== "chat" || item.provider === "mock")
           .every((item) => !("contextBudget" in item)));
+      }
       assert.equal(row.request.contentBytes, statePayload.reduce((n, m) => n + Buffer.byteLength(m.content), 0));
       assert.ok(!JSON.stringify(row.request).includes("섹션 복원 검증"));
       assert.ok(row.body.includes("[DONE]"));
       assert.ok(!JSON.stringify(data).includes("fixture-only"));
     }
-    const clear = page.getByRole("button", { name: "로그 비우기" });
+    await providerFilter.selectOption("mock");
+    await statusFilter.selectOption("timeout");
+    await page.getByText("조건에 맞는 호출이 없습니다.").waitFor();
+    assert.equal(await logPicker.count(), 0);
+    assert.equal(await detail.count(), 0);
+    await page.getByRole("button", { name: "필터 초기화" }).click();
+    assert.equal(await logPicker.locator("option").count(), list.length);
+    await logPicker.selectOption(sample.id);
+    const clear = page.getByRole("button", { name: "로그 전체 비우기" });
     page.once("dialog", (dialog) => dialog.dismiss());
     await clear.click();
     assert.equal(await page.getByLabel("호출 선택").inputValue(), sample.id);
