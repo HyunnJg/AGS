@@ -439,3 +439,80 @@ test("저장 장치가 계속 실패해도 SSE 오류 이벤트로 한 번 종�
   assert.equal(wire.match(/event: error/g)?.length, 1);
   assert.ok(!wire.includes(secret));
 });
+
+test("OpenAI 직접 연결은 고정 주소·전용 키·출력 한도를 사용하고 오류 본문을 마스킹한다", async (t) => {
+  const db = new SessionStore(":memory:");
+  t.after(() => db.close());
+  const env = {
+    AGS_OPENAI_API_KEY: "direct-test-key",
+    AGS_OPENROUTER_API_KEY: "router-test-key",
+    AGS_CUSTOM_API_KEY: "custom-test-key",
+    AGS_CUSTOM_BASE_URL: "http://localhost/v1",
+  };
+  let status = 200;
+  const adapters = configureProviders(env, async (url, init) => {
+    assert.equal(String(url), "https://api.openai.com/v1/chat/completions");
+    assert.equal(init?.redirect, "error");
+    assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${env.AGS_OPENAI_API_KEY}`);
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.max_completion_tokens, 123);
+    assert.equal(request.max_tokens, undefined);
+    if (status !== 200) return Response.json({ error: { message: Object.values(env).join(" ") } }, { status });
+    return new Response('data: {"choices":[{"delta":{"refusal":"검토 결과"}}]}\n\ndata: [DONE]\n\n', {
+      headers: { "content-type": "text/event-stream" },
+    });
+  });
+  const target = { provider: "openai" as const, model: "fixture" };
+  const run = async () => {
+    const capture = db.startCall("chat", target, null);
+    try {
+      let result = "";
+      for await (const text of adapters.stream(target, [{ role: "user", content: "안녕" }],
+        new AbortController().signal, undefined, 123, capture)) {
+        capture?.answer(text);
+        result += text;
+      }
+      capture?.finish("completed");
+      return result;
+    } catch (error) {
+      capture?.finish("failed");
+      throw error;
+    }
+  };
+  assert.equal(await run(), "검토 결과");
+  for (const [code, failure] of [[401, /provider_auth/], [429, /provider_limit/], [503, /provider_failed/]] as const) {
+    status = code;
+    await assert.rejects(run(), failure);
+    const entry = db.callDetails()[0];
+    assert.equal(entry?.httpStatus, code);
+    assert.equal(entry?.status, "failed");
+    for (const key of [env.AGS_OPENAI_API_KEY, env.AGS_OPENROUTER_API_KEY, env.AGS_CUSTOM_API_KEY])
+      assert.ok(!entry?.body.includes(key));
+  }
+  let calls = 0;
+  const noKey = configureProviders({ AGS_OPENROUTER_API_KEY: "router-only" }, async () => {
+    calls++;
+    throw new Error("unexpected request");
+  });
+  await assert.rejects(noKey.models("openai"), /provider_unavailable/);
+  await assert.rejects(noKey.stream(target, [], new AbortController().signal).next(), /provider_failed/);
+  assert.equal(calls, 0);
+});
+
+test("새 대화의 기본 공급자는 설정된 OpenRouter, OpenAI, mock 순서다", async (t) => {
+  const token = "x".repeat(32);
+  const env = { AGS_OPENAI_API_KEY: "fixture", AGS_OPENAI_MODEL: "direct" };
+  for (const [settings, expected] of [
+    [{ ...env, AGS_OPENROUTER_API_KEY: "fixture-2", AGS_OPENROUTER_MODEL: "router" }, ["openrouter", "router"]],
+    [env, ["openai", "direct"]],
+    [{ ...env, AGS_OPENAI_API_KEY: "" }, ["mock", ""]],
+  ] as const) {
+    const store = new SessionStore(":memory:");
+    t.after(() => store.close());
+    const base = await listen(t, createChatServer(token, undefined, 2500, store, configureProviders(settings)));
+    const res = await fetch(`${base}/api/sessions`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    assert.equal(res.status, 201);
+    const session = await res.json();
+    assert.deepEqual([session.provider, session.model], expected);
+  }
+});
