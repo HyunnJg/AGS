@@ -114,7 +114,7 @@ test(
       if (payload.messages.some((m) => m.content === "섹션 복원 검증")) {
         statePayload = payload.messages;
         res.writeHead(200, { "content-type": "text/event-stream" });
-        res.end('data: {"choices":[{"delta":{"content":"복원 확인"}}]}\n\ndata: [DONE]\n\n');
+        res.end('data: {"choices":[{"delta":{"content":"복원 확인"}}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":32,"completion_tokens":8,"total_tokens":40,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":3},"completion_tokens_details":{"reasoning_tokens":2}}}\n\ndata: [DONE]\n\n');
         return;
       }
       assert.equal(payload.model, "ui/test-model");
@@ -861,6 +861,9 @@ test(
     const detail = page.getByRole("region", { name: "호출 상세" });
     await detail.getByText(/HTTP 200/).waitFor();
     await detail.getByText(new RegExp(`메시지 ${statePayload.length}개`)).waitFor();
+    await detail.getByText("공급자 보고 토큰", { exact: true }).waitFor();
+    await detail.getByText("입력 32 · 캐시 읽기 0 · 캐시 쓰기 3 · 출력 8 · 추론 2 · 합계 40", { exact: true }).waitFor();
+    assert.ok(list.every((item) => !("usage" in item)));
     await detail.getByText("전송 시 입력 구성").waitFor();
     await detail.getByText("블록별 입력 예산", { exact: true }).click();
     const loggedBudget = detail.getByRole("table", { name: "블록별 입력 예산" });
@@ -876,6 +879,9 @@ test(
       const data = JSON.parse(await readFile(await (await file).path(), "utf8"));
       const row = Array.isArray(data) ? data.find((item) => item.id === sample.id) : data;
       assert.equal(row.answer, "복원 확인");
+      assert.deepEqual(row.usage, {
+        inputTokens: 32, outputTokens: 8, totalTokens: 40, cachedInputTokens: 0, cacheWriteTokens: 3, reasoningTokens: 2,
+      });
       assert.equal(row.contextBudget.estimatedInput, restored.estimatedInput);
       assert.deepEqual(row.contextBudget.blockUsage, restored.blockUsage);
       if (Array.isArray(data))
@@ -990,6 +996,7 @@ test(
       assert.ok(directLogs.some(row => row.provider === "openai" && row.kind === kind && row.status === "completed"));
     }
     const reviewLog = directLogs.find(row => row.kind === "review" && row.provider === "openai");
+    assert.deepEqual(reviewLog.usage, {totalTokens: 24});
     assert.equal(reviewLog.request.maxTokens, 1200);
     assert.equal(reviewLog.headers["x-request-id"], "openai-local-1");
     assert.ok(reviewLog.body.includes("[DONE]"));
@@ -1025,6 +1032,7 @@ test(
     for (const kind of ["catalog", "chat", "review"])
       assert.ok(nativeLogs.some(row => row.provider === "gemini" && row.kind === kind && row.status === "completed"));
     const nativeReview = nativeLogs.find(row => row.provider === "gemini" && row.kind === "review");
+    assert.deepEqual(nativeReview.usage, {totalTokens: 29});
     assert.equal(nativeReview.answer, independent.reply);
     assert.equal(nativeReview.request.maxTokens, 1200);
     assert.match(nativeReview.body, /usageMetadata/);
@@ -1055,6 +1063,7 @@ test(
     await page.waitForFunction(id => sessionStorage.getItem("ags-session") === id, claudeReview.reviewer);
     const claudeLogs = await (await page.request.get(`${base}/api/call-logs/export`, {headers})).json();
     const logged = claudeLogs.find(row => row.provider === "anthropic" && row.kind === "review");
+    assert.deepEqual(logged.usage, {outputTokens: 7});
     assert.equal(logged.answer, claudeReview.reply);
     assert.equal(logged.request.maxTokens,1200);
     assert.match(logged.body,/output_tokens/);

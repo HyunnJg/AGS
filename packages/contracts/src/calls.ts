@@ -18,7 +18,21 @@ export interface CallSummary extends ModelSelection {
   status: CallStatus;
   httpStatus: number | null;
 }
+export const usageLabels = {
+  inputTokens: "입력",
+  uncachedInputTokens: "입력 (캐시 제외)",
+  cachedInputTokens: "캐시 읽기",
+  cacheWriteTokens: "캐시 쓰기",
+  outputTokens: "출력",
+  candidateTokens: "후보 출력",
+  reasoningTokens: "추론",
+  toolPromptTokens: "도구 입력",
+  totalTokens: "합계",
+} as const;
+export type ReportedUsage = Partial<Record<keyof typeof usageLabels, number>>;
+
 export interface CallLog extends CallSummary {
+  usage?: ReportedUsage;
   contextBudget?: ContextBudget;
   request?: { messageCount: number; contentBytes: number; maxTokens: number | null };
   headers: Record<string, string>;

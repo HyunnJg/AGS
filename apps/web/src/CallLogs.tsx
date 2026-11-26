@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { callKinds, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
+import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
 import { BlockBudgetTable } from "./BlockBudgetTable.tsx";
 import { api } from "./api.ts";
@@ -79,6 +79,22 @@ function CallDetail({ token, id }: { token: string; id: string }) {
               : `${log.contextBudget.inputCeiling.toLocaleString()}토큰`}
           </p>
           <BlockBudgetTable rows={log.contextBudget.blockUsage} />
+        </>
+      )}
+      {log.kind !== "catalog" && log.provider !== "mock" && (
+        <>
+          <h4>공급자 보고 토큰</h4>
+          <p>
+            {log.usage
+              ? (Object.keys(usageLabels) as (keyof typeof usageLabels)[])
+                  .flatMap((key) => {
+                    const count = log.usage?.[key];
+                    return count === undefined ? [] : [`${usageLabels[key]} ${count.toLocaleString()}`];
+                  })
+                  .join(" · ")
+              : "저장된 사용량 없음"}
+          </p>
+          {log.usage && log.status !== "completed" && <small>호출이 끝나기 전까지 받은 수치입니다.</small>}
         </>
       )}
       <h4>응답 헤더</h4>

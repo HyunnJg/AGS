@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CallKind, CallLog, CallStatus } from "../../contracts/src/calls.ts";
+import type { CallKind, CallLog, CallStatus, ReportedUsage } from "../../contracts/src/calls.ts";
 import type { Message } from "../../contracts/src/context.ts";
 import type { ModelSelection } from "../../contracts/src/providers.ts";
 
@@ -18,6 +18,7 @@ export class CallCapture {
   private clipped = false;
   private text = "";
   private textClipped = false;
+  private usage?: ReportedUsage;
   private request?: CallLog["request"];
   private http: number | null = null;
   private headers: Record<string, string> = {};
@@ -40,6 +41,11 @@ export class CallCapture {
       contentBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.content, "utf8"), 0),
       maxTokens: maxTokens ?? null,
     };
+  }
+  recordTokens(field: keyof ReportedUsage, value: unknown) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return;
+    this.usage ??= {};
+    this.usage[field] = value;
   }
   response(response: Response) {
     this.http = response.status;
@@ -99,6 +105,7 @@ export class CallCapture {
         status,
         httpStatus: this.http,
         ...(this.request && { request: this.request }),
+        ...(this.usage && { usage: this.usage }),
         headers: this.headers,
         body: sensitiveAnswer && raw ? hidden : this.clean(raw, this.clipped),
         bodyLimited: this.clipped,

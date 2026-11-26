@@ -136,4 +136,14 @@ Anthropic은 워크스페이스 전용 키를 Bearer 헤더로 전송한다. `an
 
 새 공급자 일반 채팅의 상세 및 내보내기에는 조립 당시의 `contextBudget`이 포함된다. `estimatedInput`, `inputCeiling`, `blockUsage`는 미리보기와 같은 의미이며 AGS의 추정치다. 입력 원문은 이 필드에 저장하지 않는다. 로컬 mock, 독립 검토, 구간 요약, 모델 목록 조회 및 이전 기록은 이 필드를 생략한다.
 
+채팅·독립 검토·구간 요약의 상세 및 JSON 내보내기에서 `usage`는 공급자 스트림이 보고한 토큰 수다. 같은 항목이 여러 번 오면 마지막 유효값을 보관한다. 0은 보고된 값이며 누락·음수·소수·문자열은 생략한다. 이전 로그 및 유효한 사용량이 없는 호출에는 이 필드가 없다. 실패·취소·시간 초과 호출에는 수신한 일부 수치만 남을 수 있다.
+
+| 응답 형식 | 저장하는 항목 |
+|---|---|
+| OpenAI 호환 | `inputTokens`, `outputTokens`, `totalTokens`, 세부 항목의 `cachedInputTokens`, `cacheWriteTokens`, `reasoningTokens` |
+| Gemini | `inputTokens`, `cachedInputTokens`, `candidateTokens`, `reasoningTokens`, `toolPromptTokens`, `totalTokens` |
+| Anthropic | `uncachedInputTokens`, `cachedInputTokens`, `cacheWriteTokens`, `outputTokens` |
+
+캐시와 추론의 포함 관계는 공급자마다 다르므로 AGS는 항목을 더해 합계나 비용을 만들지 않는다.
+
 인증된 `DELETE /api/call-logs`는 현재 저장된 호출 로그만 일괄 삭제하고 `{ deleted: 건수 }`를 반환한다. 빈 목록도 성공으로 처리한다. 진행 중인 호출은 시작 당시의 기록 설정에 따라 종료 시 저장된다.
