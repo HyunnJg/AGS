@@ -384,7 +384,7 @@ export function SettingsCenter({
           ) : section === "언어 지원" ? (
             <LanguageSetting token={token} />
           ) : section === "호출 로그" ? (
-            <CallLogs token={token} />
+            <CallLogs token={token} currentSession={session} />
           ) : section === "토글형 모듈" ? (
             <SectionMemorySetting token={token} />
           ) : (

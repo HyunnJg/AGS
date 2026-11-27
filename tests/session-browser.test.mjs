@@ -1011,10 +1011,38 @@ test(
     const providerFilter = filters.getByLabel("공급자", { exact: true });
     const kindFilter = filters.getByLabel("호출 종류");
     const statusFilter = filters.getByLabel("종료 상태");
+    const sessionFilter = filters.getByLabel("대화", {exact:true});
+    const currentLogSession = await page.evaluate(() => sessionStorage.getItem("ags-session"));
+    assert.equal(await sessionFilter.getByRole("option", {name:"현재 대화 · 첫 작업"}).getAttribute("value"), currentLogSession);
+    await sessionFilter.selectOption({label:"사료 대조"});
+    assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)),
+      list.filter(row => row.session === activeId).map(row => row.id));
+    await sessionFilter.selectOption({label:"대화 미지정"});
+    assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)),
+      list.filter(row => row.session === null).map(row => row.id));
+    await sessionFilter.selectOption(freshId);
+    const scoped = list.filter(row => row.session === freshId);
+    assert.ok(scoped.some(row => row.kind === "review") && scoped.some(row => row.kind === "checkpoint"));
+    assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), scoped.map(row => row.id));
+
+    const sessionNames = await (await page.request.get(`${base}/api/sessions`, { headers })).json();
+    const sameTitle = "같은 작업명".repeat(12);
+    for (const key of [sessionId, freshId]) {
+      const response = await page.request.put(`${base}/api/sessions/${key}/title`, {
+        headers, data: { previous: sessionNames.find(s => s.id === key).title, title: sameTitle },
+      });
+      assert.ok(response.ok());
+    }
+    await page.getByRole("button", {name:"목록 새로고침"}).click();
+    for (const key of [sessionId, freshId])
+      await sessionFilter.getByRole("option", {name: new RegExp(`${sameTitle}.*${key}`)}).waitFor({state:"attached"});
+    assert.equal(await sessionFilter.inputValue(), freshId);
+    assert.ok(await page.locator("dialog").evaluate(el => el.scrollWidth <= el.clientWidth));
+    await sessionFilter.selectOption(sample.session);
     await providerFilter.selectOption("custom");
     await kindFilter.selectOption("chat");
     await statusFilter.selectOption("completed");
-    const matching = list.filter((row) => row.provider === "custom" && row.kind === "chat" && row.status === "completed");
+    const matching = list.filter((row) => row.session === sample.session && row.provider === "custom" && row.kind === "chat" && row.status === "completed");
     assert.ok(matching.length > 0 && matching.length < list.length);
     assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), matching.map(r => r.id));
     await page.getByText(`${list.length}건 중 ${matching.length}건`, { exact: true }).waitFor();

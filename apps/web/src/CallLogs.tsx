@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
+import type { Session } from "../../../packages/contracts/src/sessions.ts";
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
 import { BlockBudgetTable } from "./BlockBudgetTable.tsx";
 import { api } from "./api.ts";
@@ -40,7 +41,7 @@ function download(value: unknown, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function CallDetail({ token, id }: { token: string; id: string }) {
+function CallDetail({ token, id, sessionTitle }: { token: string; id: string; sessionTitle?: string }) {
   const [log, setLog] = useState<CallLog>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -63,10 +64,7 @@ function CallDetail({ token, id }: { token: string; id: string }) {
         {new Date(log.started).toLocaleString()} · {statuses[log.status]} · {log.durationMs}ms ·{" "}
         {log.httpStatus ? `HTTP ${log.httpStatus}` : noHttp}
       </p>
-      <small>
-        호출 ID {log.id}
-        {log.session && ` · 대화 ${log.session}`}
-      </small>
+      <small>호출 ID {log.id}{log.session && <> · 대화 {sessionTitle && `${sessionTitle} · `}{log.session}</>}</small>
       <button type="button" onClick={() => download(log, `AGS-call-${id}.json`)}>
         이 호출 JSON 다운로드
       </button>
@@ -127,18 +125,43 @@ function CallDetail({ token, id }: { token: string; id: string }) {
   );
 }
 
-export function CallLogs({ token }: { token: string }) {
+const noSession = "unassigned";
+const emptyFilters = { session: "", provider: "", kind: "", status: "" };
+
+export function CallLogs({ token, currentSession }: { token: string; currentSession?: Session }) {
   const [rows, setRows] = useState<CallSummary[]>();
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [enabled, setEnabled] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [id, setId] = useState("");
-  const [filters, setFilters] = useState({ provider: "", kind: "", status: "" });
+  const [filters, setFilters] = useState(emptyFilters);
+  const sessionById = new Map(sessions.map(s => [s.id, s]));
+  const sessionIds = new Set<string>();
+  if (currentSession) sessionIds.add(currentSession.id);
+  for (const row of rows ?? []) sessionIds.add(row.session ?? noSession);
+  // A refresh may evict the last call for the selected conversation.
+  if (filters.session) sessionIds.add(filters.session);
+  const sessionOptions: Record<string, string> = {};
+  const labelCounts = new Map<string, number>();
+  for (const id of sessionIds) {
+    const session = sessionById.get(id) ?? (id === currentSession?.id ? currentSession : undefined);
+    const name = id === noSession ? "대화 미지정" :
+      session ? [session.title, session.sectionLabel].filter(Boolean).join(" · ") : id;
+    sessionOptions[id] = name;
+    labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
+  }
+  for (const id of sessionIds) {
+    if ((labelCounts.get(sessionOptions[id]) ?? 0) > 1 && id !== noSession) sessionOptions[id] += ` · ${id}`;
+    if (id === currentSession?.id) sessionOptions[id] = `현재 대화 · ${sessionOptions[id]}`;
+  }
   const visibleRows = rows?.filter((row) =>
+    (!filters.session || (row.session ?? noSession) === filters.session) &&
     (!filters.provider || row.provider === filters.provider) &&
     (!filters.kind || row.kind === filters.kind) &&
     (!filters.status || row.status === filters.status)
   ) ?? [];
-  const selectedId = visibleRows.find((row) => row.id === id)?.id ?? visibleRows[0]?.id;
+  const selected = visibleRows.find((row) => row.id === id) ?? visibleRows[0];
+  const selectedId = selected?.id;
   function changeFilter(key: keyof typeof filters, value: string) {
     setId(selectedId ?? "");
     setFilters((current) => ({ ...current, [key]: value }));
@@ -150,10 +173,12 @@ export function CallLogs({ token }: { token: string }) {
     const c = new AbortController();
     Promise.all([
       api(token, query.path, "GET", undefined, c.signal).then((r) => r.json()),
+      api(token, "/api/sessions", "GET", undefined, c.signal).then((r) => r.json()),
       api(token, "/api/settings/call-logs", "GET", undefined, c.signal).then((r) => r.json()),
     ])
-      .then(([items, setting]: [CallSummary[], { enabled: boolean }]) => {
+      .then(([items, sessionList, setting]: [CallSummary[], Session[], { enabled: boolean }]) => {
         if (c.signal.aborted) return;
+        setSessions(sessionList);
         setRows(items);
         setEnabled(setting.enabled);
         setError("");
@@ -244,18 +269,19 @@ export function CallLogs({ token }: { token: string }) {
       {rows && rows.length > 0 && (
         <>
           <fieldset className="call-log-filters" aria-label="호출 필터">
+            <LogFilter label="대화" options={sessionOptions} value={filters.session} change={v => changeFilter("session", v)} />
             <LogFilter label="공급자" options={providerNames} value={filters.provider} change={(v) => changeFilter("provider", v)} />
             <LogFilter label="호출 종류" options={callKinds} value={filters.kind} change={(v) => changeFilter("kind", v)} />
             <LogFilter label="종료 상태" options={statuses} value={filters.status} change={(v) => changeFilter("status", v)} />
           </fieldset>
-          {(filters.provider || filters.kind || filters.status) && (
+          {Object.values(filters).some(Boolean) && (
             <div>
               <output>{rows.length}건 중 {visibleRows.length}건</output>{" "}
               <button type="button" disabled={busy || loading || visibleRows.length === 0}
                 onClick={() => void action("filtered")}>필터 결과 JSON 다운로드</button>{" "}
               <button type="button" onClick={() => {
                 setId(selectedId ?? "");
-                setFilters({ provider: "", kind: "", status: "" });
+                setFilters(emptyFilters);
               }}>필터 초기화</button>
             </div>
           )}
@@ -276,7 +302,7 @@ export function CallLogs({ token }: { token: string }) {
         </>
       )}
       {rows?.length === 0 && <p>아직 기록된 호출이 없습니다.</p>}
-      {selectedId && <CallDetail key={selectedId} id={selectedId} token={token} />}
+      {selectedId && <CallDetail key={selectedId} id={selectedId} token={token} sessionTitle={selected?.session ? sessionById.get(selected.session)?.title : undefined} />}
     </div>
   );
 }
