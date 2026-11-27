@@ -171,7 +171,7 @@ export function CallLogs({ token }: { token: string }) {
     setLoading(true);
     refresh({ path: "/api/call-logs" });
   }
-  async function action(command: "download" | "toggle" | "clear") {
+  async function action(command: "download" | "filtered" | "toggle" | "clear") {
     if (
       command === "clear" &&
       !window.confirm("현재 저장된 호출 로그를 모두 비울까요? 대화 기록은 유지됩니다.")
@@ -180,12 +180,14 @@ export function CallLogs({ token }: { token: string }) {
     setBusy(true);
     setError("");
     try {
-      if (command === "download")
-        download(
-          await (await api(token, "/api/call-logs/export")).json(),
-          `AGS-calls-${new Date().toISOString().slice(0, 10)}.json`,
-        );
-      else if (command === "clear") {
+      if (command === "download" || command === "filtered") {
+        const path = "/api/call-logs/export";
+        const response = command === "filtered"
+          ? await api(token, path, "POST", { ids: visibleRows.map(row => row.id) })
+          : await api(token, path);
+        const prefix = command === "filtered" ? "AGS-calls-filtered" : "AGS-calls";
+        download(await response.json(), `${prefix}-${new Date().toISOString().slice(0, 10)}.json`);
+      } else if (command === "clear") {
         await api(token, "/api/call-logs", "DELETE");
         setRows([]);
         reload("");
@@ -193,10 +195,11 @@ export function CallLogs({ token }: { token: string }) {
         const response = await api(token, "/api/settings/call-logs", "PUT", { enabled: !enabled });
         setEnabled((await response.json()).enabled);
       }
-    } catch {
+    } catch (e) {
       setError(
         {
           download: "로그를 내려받지 못했습니다.",
+          filtered: e instanceof Error ? e.message : "필터 결과를 내려받지 못했습니다.",
           toggle: "기록 설정을 변경하지 못했습니다.",
           clear: "로그를 비우지 못했습니다.",
         }[command],
@@ -248,6 +251,8 @@ export function CallLogs({ token }: { token: string }) {
           {(filters.provider || filters.kind || filters.status) && (
             <div>
               <output>{rows.length}건 중 {visibleRows.length}건</output>{" "}
+              <button type="button" disabled={busy || loading || visibleRows.length === 0}
+                onClick={() => void action("filtered")}>필터 결과 JSON 다운로드</button>{" "}
               <button type="button" onClick={() => {
                 setId(selectedId ?? "");
                 setFilters({ provider: "", kind: "", status: "" });

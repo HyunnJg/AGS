@@ -183,9 +183,21 @@ export function createChatServer(
     const logRoute = /^\/api\/call-logs(?:\/(export|[a-f0-9-]{36}))?$/.exec(path);
     if (logRoute && store) {
       if (!logRoute[1] && req.method === "DELETE") return json({ deleted: store.clearCallLogs() });
+      if (logRoute[1] === "export") {
+        if (req.method === "GET") return json(store.callDetails());
+        if (req.method !== "POST") return allow("GET, POST");
+        const body = await readBody(req);
+        const ids = body && typeof body === "object" && "ids" in body ? body.ids : undefined;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 ||
+            !ids.every(id => typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)) ||
+            new Set(ids).size !== ids.length)
+          throw new RequestError(400, "invalid_call_selection");
+        const entries = store.callDetails(ids);
+        if (entries.length !== ids.length) throw new RequestError(409, "call_selection_changed");
+        return json(entries);
+      }
       if (req.method !== "GET") return allow(logRoute[1] ? "GET" : "GET, DELETE");
       if (!logRoute[1]) return json(store.callList());
-      if (logRoute[1] === "export") return json(store.callDetails());
       const entry = store.callDetails(logRoute[1])[0];
       if (!entry) throw new RequestError(404, "unknown_call");
       return json(entry);

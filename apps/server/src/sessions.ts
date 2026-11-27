@@ -329,9 +329,11 @@ export class SessionStore {
       .all()
       .map((row) => JSON.parse(String(row.summary)));
   }
-  callDetails(id?: string): CallLog[] {
-    const rows = id
-      ? this.db.prepare("SELECT summary,detail FROM call_log WHERE id=?").all(id)
+  callDetails(selection?: string | readonly string[]): CallLog[] {
+    const ids = typeof selection === "string" ? [selection] : selection;
+    const rows = ids
+      ? this.db.prepare(`SELECT summary,detail FROM call_log
+          WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rowid DESC`).all(JSON.stringify(ids))
       : this.db.prepare("SELECT summary,detail FROM call_log ORDER BY rowid DESC").all();
     return rows.map((row) => ({ ...JSON.parse(String(row.summary)), ...JSON.parse(String(row.detail)) }));
   }
