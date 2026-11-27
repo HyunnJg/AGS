@@ -207,9 +207,9 @@ test(
     await page.getByText(dir, { exact: true }).waitFor();
     const exportChat = page.getByRole("button", {name:"대화 Markdown 다운로드"});
     assert.equal(await exportChat.count(), 0);
-    async function readTranscript() {
+    async function readTranscript(button = exportChat) {
       const pending = page.waitForEvent("download");
-      await exportChat.click();
+      await button.click();
       const file = await pending;
       return { name: file.suggestedFilename(), content: await readFile(await file.path(), "utf8") };
     }
@@ -253,6 +253,11 @@ test(
     await page.getByRole("button", {name:"고급 기능"}).click();
     await exportChat.click();
     await page.getByText("아직 저장된 메시지가 없습니다.").waitFor();
+    const rangeMode = page.getByRole("checkbox", {name:"턴 범위 선택"});
+    const downloadRange = page.getByRole("button", {name:"선택 구간 Markdown 다운로드"});
+    await rangeMode.check();
+    await page.getByText("아직 저장된 메시지가 없습니다.").waitFor();
+    assert.ok(await downloadRange.isDisabled());
     await page.keyboard.press("Escape");
     await page.getByLabel("프리셋").selectOption("coding");
     await page.getByLabel("메시지").fill("첫 작업");
@@ -422,6 +427,46 @@ test(
     assert.equal(separateTranscript.name, "AGS-대조_ 초안_검토_.md");
     assert.equal(separateTranscript.content,
       "# 대조: 초안/검토?\n\n## 1. 사용자\n\n별도 세션\n\n### 답변 · 로컬 mock · 완료\n\n[mock] 수신한 메시지: 별도 세션\n");
+    const startTurn = page.getByRole("combobox", {name:"시작 턴", exact:true});
+    const endTurn = page.getByRole("combobox", {name:"끝 턴", exact:true});
+    async function appendMockTurn(message) {
+      const result = await page.request.post(`${base}/api/sessions/${activeId}/chat`, {
+        headers: { authorization: `Bearer ${token}` }, data: {message},
+      });
+      assert.equal(result.status(), 200);
+    }
+    await appendMockTurn("자료 대조 결과");
+    await appendMockTurn("후속 검토 사항");
+    await rangeMode.check();
+    await startTurn.getByRole("option", {name:"3턴 · 후속 검토 사항"}).waitFor({state:"attached"});
+    assert.equal(await startTurn.inputValue(), "2");
+    assert.equal(await endTurn.locator("option").count(), 1);
+    const lastTurnOnly = await readTranscript(downloadRange);
+    assert.match(lastTurnOnly.content, /## 3\. 사용자/);
+    assert.doesNotMatch(lastTurnOnly.content, /## [12]\. 사용자/);
+    await startTurn.selectOption({label:"2턴 · 자료 대조 결과"});
+    await appendMockTurn("범위 밖에서 추가한 메시지");
+    const rangeFile = await readTranscript(downloadRange);
+    assert.equal(rangeFile.name, "AGS-대조_ 초안_검토_-2-3턴.md");
+    assert.match(rangeFile.content, /## 2\. 사용자[\s\S]*자료 대조 결과[\s\S]*## 3\. 사용자[\s\S]*후속 검토 사항/);
+    assert.doesNotMatch(rangeFile.content, /별도 세션|범위 밖에서 추가한 메시지|다시 돌아와서 쓸 초안/);
+    await endTurn.selectOption("1");
+    await startTurn.selectOption("2");
+    assert.equal(await endTurn.inputValue(), "2");
+    // Simulate a restored history with a different turn at the same position.
+    await page.route(`${base}/api/sessions/${activeId}`, async route => {
+      const response = await route.fetch();
+      const data = await response.json();
+      data.turns[2].id = "replacement-turn";
+      await route.fulfill({ response, json: data });
+    }, { times: 1 });
+    await downloadRange.click();
+    await page.getByText("대화 기록이 바뀌었습니다. 내보낼 구간을 다시 선택하세요.").waitFor();
+    assert.ok(await downloadRange.isDisabled());
+    await startTurn.selectOption({label:"4턴 · 범위 밖에서 추가한 메시지"});
+    assert.match((await readTranscript(downloadRange)).content, /## 4\. 사용자/);
+    await rangeMode.uncheck();
+    assert.match((await readTranscript()).content, /## 4\. 사용자[\s\S]*범위 밖에서 추가한 메시지/);
     await page.keyboard.press("Escape");
     assert.equal(await draftBox.inputValue(), "다시 돌아와서 쓸 초안");
     const titleUrl = `${base}/api/sessions/${activeId}/title`;

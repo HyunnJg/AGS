@@ -790,6 +790,10 @@ header h2 {
 .default-model button { font-size: .85rem; }
 
 .conversation-export { overflow-wrap: anywhere; }
+.conversation-export .match-case { display: flex; align-items: center; gap: 6px; margin-bottom: .5rem; }
+.conversation-export .match-case input { width: auto; }
+.export-range { min-width: 0; margin: 0 0 .5rem; display: grid; gap: .5rem; }
+.export-range label { min-width: 0; }
 .call-logs, .call-detail { display: grid; gap: 10px; min-width: 0; }
 .call-log-filters { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: 8px; }
 .call-log-filters > div { min-width: 0; }
