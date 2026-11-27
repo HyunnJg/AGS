@@ -1,3 +1,4 @@
+import { ConversationExport } from "./ConversationExport.tsx";
 import { PresetLibrary } from "./PresetLibrary.tsx";
 import { LanguageSetting } from "./LanguageSetting.tsx";
 import { CallLogs } from "./CallLogs.tsx";
@@ -388,7 +389,10 @@ export function SettingsCenter({
           ) : section === "토글형 모듈" ? (
             <SectionMemorySetting token={token} />
           ) : (
-            <Runtime token={token} />
+            <>
+              <Runtime token={token} />
+              {session && <ConversationExport key={session.id} token={token} session={session} />}
+            </>
           )}
         </section>
       </div>

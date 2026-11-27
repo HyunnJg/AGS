@@ -58,3 +58,11 @@ export interface Turn extends ModelSelection {
   status: "streaming" | "completed" | "cancelled" | "failed" | "interrupted";
   preset: Preset;
 }
+
+export const turnStatusLabels = {
+  streaming: "응답 중",
+  completed: "완료",
+  cancelled: "중단됨",
+  failed: "응답 실패",
+  interrupted: "연결 종료로 중단됨",
+} satisfies Record<Turn["status"], string>;

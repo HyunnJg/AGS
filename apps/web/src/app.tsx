@@ -8,7 +8,7 @@ import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
+import { turnStatusLabels, presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
 import {
   isModelSelection,
@@ -78,14 +78,6 @@ function Login({ enter }: { enter: (token: string) => void }) {
     </main>
   );
 }
-
-const statusLabels = {
-  streaming: "응답 중",
-  completed: "",
-  cancelled: "중단됨",
-  failed: "응답 실패",
-  interrupted: "연결 종료로 중단됨",
-};
 
 function Conversation({
   token,
@@ -316,7 +308,7 @@ function Conversation({
                 </small>
               </div>
               <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />
-              {statusLabels[t.status] && <small className="status">{statusLabels[t.status]}</small>}
+              {t.status !== "completed" && <small className="status">{turnStatusLabels[t.status]}</small>}
             </article>
           ))}
           <div ref={end} />
