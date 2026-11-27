@@ -119,6 +119,48 @@ function CallDetail({ token, id, sessionTitle }: { token: string; id: string; se
   );
 }
 
+function UsageTotals({ rows }: { rows: CallSummary[] }) {
+  const calls = rows.filter(row => row.kind !== "catalog" && row.provider !== "mock");
+  const reported = calls.filter(row => row.usage);
+  const fields = (Object.keys(usageLabels) as (keyof typeof usageLabels)[]).flatMap(key => {
+    let sum = 0n;
+    let count = 0;
+    for (const { usage } of reported) {
+      const value = usage?.[key];
+      if (value !== undefined) {
+        sum += BigInt(value);
+        count++;
+      }
+    }
+    return count ? [{ key, sum, count }] : [];
+  });
+  return (
+    <details className="usage-totals">
+      <summary>필터 결과 토큰 사용량</summary>
+      {calls.length === 0 ? <p>이 조건에 해당하는 모델 API 호출이 없습니다.</p> : (
+        <>
+          <p>모델 API 호출 {calls.length}건 중 {reported.length}건에서 사용량을 보고했습니다.</p>
+          {fields.length > 0 && (
+            <table aria-label="필터 결과 토큰 사용량">
+              <thead><tr><th scope="col">항목</th><th scope="col">토큰 합계</th><th scope="col">보고한 호출</th></tr></thead>
+              <tbody>
+                {fields.map(({ key, sum, count }) => (
+                  <tr key={key}>
+                    <th scope="row">{usageLabels[key]}</th>
+                    <td>{sum.toLocaleString()}</td>
+                    <td>{count} / {calls.length}건</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </details>
+  );
+}
+
+const usageListPath = "/api/call-logs?usage=1";
 const noSession = "unassigned";
 const emptyFilters = { session: "", provider: "", kind: "", status: "" };
 
@@ -161,7 +203,7 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
     setFilters((current) => ({ ...current, [key]: value }));
   }
   const [error, setError] = useState("");
-  const [query, refresh] = useState({ path: "/api/call-logs" });
+  const [query, refresh] = useState({ path: usageListPath });
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const c = new AbortController();
@@ -188,7 +230,7 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
   function reload(keepId = selectedId ?? "") {
     setId(keepId);
     setLoading(true);
-    refresh({ path: "/api/call-logs" });
+    refresh({ path: usageListPath });
   }
   async function action(command: "download" | "filtered" | "toggle" | "clear") {
     if (
@@ -279,6 +321,7 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
               }}>필터 초기화</button>
             </div>
           )}
+          <UsageTotals rows={visibleRows} />
           {selectedId ? (
             <label>
               호출 선택

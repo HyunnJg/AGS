@@ -180,6 +180,10 @@ export function createChatServer(
       } else if (req.method !== "GET") return allow("GET, PUT");
       return json({ enabled: store.logsEnabled() });
     }
+    if (path === "/api/call-logs?usage=1" && store) {
+      if (req.method !== "GET") return allow("GET");
+      return json(store.callList(true));
+    }
     const logRoute = /^\/api\/call-logs(?:\/(export|[a-f0-9-]{36}))?$/.exec(path);
     if (logRoute && store) {
       if (!logRoute[1] && req.method === "DELETE") return json({ deleted: store.clearCallLogs() });

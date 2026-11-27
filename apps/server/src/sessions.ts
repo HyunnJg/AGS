@@ -334,11 +334,13 @@ export class SessionStore {
     this.protectCall?.(capture);
     return capture;
   }
-  callList(): CallSummary[] {
-    return this.db
-      .prepare("SELECT summary FROM call_log ORDER BY rowid DESC")
-      .all()
-      .map((row) => JSON.parse(String(row.summary)));
+  callList(includeUsage = false): CallSummary[] {
+    const columns = includeUsage ? "summary, json_extract(detail, '$.usage') AS usage" : "summary";
+    return this.db.prepare(`SELECT ${columns} FROM call_log ORDER BY rowid DESC`).all().map((row) => {
+      const summary: CallSummary = JSON.parse(String(row.summary));
+      if (typeof row.usage === "string") summary.usage = JSON.parse(row.usage);
+      return summary;
+    });
   }
   callDetails(selection?: string | readonly string[]): CallLog[] {
     const ids = typeof selection === "string" ? [selection] : selection;

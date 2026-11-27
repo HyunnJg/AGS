@@ -17,6 +17,7 @@ export interface CallSummary extends ModelSelection {
   durationMs: number;
   status: CallStatus;
   httpStatus: number | null;
+  usage?: ReportedUsage;
 }
 export const usageLabels = {
   inputTokens: "입력",
@@ -32,7 +33,6 @@ export const usageLabels = {
 export type ReportedUsage = Partial<Record<keyof typeof usageLabels, number>>;
 
 export interface CallLog extends CallSummary {
-  usage?: ReportedUsage;
   contextBudget?: ContextBudget;
   request?: { messageCount: number; contentBytes: number; maxTokens: number | null };
   headers: Record<string, string>;
