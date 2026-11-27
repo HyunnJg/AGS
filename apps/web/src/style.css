@@ -115,6 +115,23 @@ textarea:focus-visible {
 .nav-label {
   margin: 0 10px 9px;
 }
+.session-search {
+  min-width: 0;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 5px 9px;
+  border: 1px solid #bdcbbf;
+  border-radius: 7px;
+  background: #fff;
+  font-size: .85rem;
+}
+.session-match-detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: .75rem;
+  color: #53665a;
+}
 .layout nav {
   overflow: auto;
   display: grid;
@@ -700,6 +717,9 @@ header h2 {
 .file-browser pre { overflow: auto; max-height: 36dvh; padding: .6rem; background: #edf0e8; }
 @media (max-width:680px) {
   .project-launcher { grid-row: 3; grid-column: 1 / -1; margin: 0; padding: 3px 10px; }
+  .layout aside:has(.session-search) .project-launcher { grid-column: 2; }
+  .session-search { grid-column: 1; grid-row: 3; margin: 0; }
+  .layout nav:has(.session-match-detail) { max-height: 54px; }
 }
 
 .conversation-title { min-width: 0; }

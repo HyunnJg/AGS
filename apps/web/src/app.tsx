@@ -388,6 +388,13 @@ function Conversation({
 
 function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionQuery, setSessionQuery] = useState("");
+  const terms = sessionQuery.trim().normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleSessions = terms.length ? sessions.filter(session => {
+    const searchable = [session.title, session.sectionLabel, providerNames[session.provider], session.provider, session.model]
+      .join(" ").normalize("NFC").toLowerCase();
+    return terms.every(term => searchable.includes(term));
+  }) : sessions;
   const [id, setId] = useState("");
   const [sessionsReady, setSessionsReady] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -441,7 +448,8 @@ function Workspace({ token }: { token: string }) {
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
   const mounted = ready ? sessions.filter((s) => s.id === id || running.includes(s.id)) : [];
-  const select = useCallback((id: string) => {
+  const select = useCallback((id: string, keepSearch = false) => {
+    if (!keepSearch) setSessionQuery("");
     setId(id);
     sessionStorage.setItem("ags-session", id);
   }, []);
@@ -509,17 +517,31 @@ function Workspace({ token }: { token: string }) {
           프로젝트 · 파일
         </button>
         <h2 className="nav-label">대화 목록</h2>
+        {sessions.length > 0 && (
+          <input
+            className="session-search"
+            type="search"
+            aria-label="대화 목록 검색"
+            placeholder="제목 · 섹션 · 모델 검색"
+            value={sessionQuery}
+            onChange={e => setSessionQuery(e.target.value)}
+          />
+        )}
         <nav aria-label="대화 목록">
-          {sessions.map((s) => (
+          {terms.length > 0 && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
+          {visibleSessions.map((s) => (
             <button
               type="button"
               key={s.id}
               disabled={locked}
               aria-current={s.id === id ? "page" : undefined}
-              onClick={() => select(s.id)}
+              onClick={() => select(s.id, true)}
             >
               {s.title}
               {running.includes(s.id) && <small> · 응답 중</small>}
+              {terms.length > 0 && <small className="session-match-detail">
+                {[s.sectionLabel, providerNames[s.provider], s.model].filter(Boolean).join(" · ")}
+              </small>}
             </button>
           ))}
         </nav>
