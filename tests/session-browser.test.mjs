@@ -18,6 +18,7 @@ test(
     const token = randomBytes(32).toString("hex");
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
+    const failedQuestion = "응답 실패 후 고쳐 쓸 질문";
     const longReply = `공유할 문단\n${"검토에 보내지 않을 내용\n".repeat(700)}직접 연결 응답`;
     const fake = createServer(async (req, res) => {
       if (req.url?.startsWith("/anthropic/")) {
@@ -33,6 +34,10 @@ test(
         for await (const chunk of req) chunks.push(chunk);
         const body = JSON.parse(Buffer.concat(chunks).toString());
         assert.equal(body.model, "claude-fixture");
+        if (body.messages.at(-1)?.content === failedQuestion) {
+          res.writeHead(503).end();
+          return;
+        }
         const review = body.system[0].text.startsWith("독립 검토자");
         if (review) {
           assert.deepEqual(body.messages, [{role:"user",content:"Claude 독립 검토 확인"}]);
@@ -182,9 +187,9 @@ test(
       assert.match(line, /^AGS http:\/\/127\.0\.0\.1:\d+$/);
       return line.slice(4);
     }
-    async function stop() {
+    async function stop(signal = "SIGTERM") {
       if (child) {
-        child.kill();
+        child.kill(signal);
         await closed;
         child = undefined;
       }
@@ -294,14 +299,23 @@ test(
     const partial = await page.locator(".reply").innerText();
     assert.ok(partial.length > 0 && partial.length < long.length);
     assert.equal(await composer.inputValue(), "");
+    const editQuestion = page.getByRole("button", { name: "질문 다시 편집", exact: true });
+    const appendQuestion = page.getByRole("button", { name: "초안 끝에 질문 추가", exact: true });
+    await editQuestion.click();
+    assert.equal(await composer.inputValue(), long.trim());
+    assert.ok(await composer.evaluate(el => el === document.activeElement));
     await composer.fill("두 번째 대화의 초안");
+    await appendQuestion.click();
+    await appendQuestion.click();
+    const recoveredDraft = `두 번째 대화의 초안\n\n${long.trim()}`;
+    assert.equal(await composer.inputValue(), recoveredDraft);
     await stop();
     await start(new URL(base).port);
     await page.reload();
     await page.getByText("중단됨", { exact: true }).waitFor();
     assert.equal(await page.locator(".reply").innerText(), partial);
     assert.equal(await page.getByLabel("프리셋").inputValue(), "general");
-    assert.equal(await composer.inputValue(), "두 번째 대화의 초안");
+    assert.equal(await composer.inputValue(), recoveredDraft);
     await page.getByRole("button", { name: "첫 작업", exact: true }).click();
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
     assert.equal(await composer.inputValue(), followupDraft);
@@ -1424,6 +1438,39 @@ test(
     assert.equal(logged.request.maxTokens,1200);
     assert.match(logged.body,/output_tokens/);
     assert.ok(!JSON.stringify(claudeLogs).includes("anthropic-ui-fixture"));
+    await composer.fill(failedQuestion);
+    await page.getByRole("button", {name:"전송"}).click();
+    const failedTurn = page.getByRole("article").filter({hasText:failedQuestion});
+    await failedTurn.getByText("응답 실패", {exact:true}).waitFor();
+    const sessionUrl = `${base}/api/sessions/${claudeReview.reviewer}`;
+    const readTurns = async () => (await (await page.request.get(sessionUrl, {headers})).json()).turns;
+    const beforeEdit = await readTurns();
+    assert.equal(beforeEdit.at(-1).status, "failed");
+    await failedTurn.getByRole("button", {name:"질문 다시 편집"}).click();
+    assert.equal(await composer.inputValue(), failedQuestion);
+    assert.deepEqual(await readTurns(), beforeEdit);
+    await switchModel("mock", "");
+    await composer.fill("고친 질문으로 재전송");
+    await page.getByRole("button", {name:"전송"}).click();
+    await page.getByText("[mock] 수신한 메시지: 고친 질문으로 재전송", {exact:true}).waitFor();
+    await page.getByRole("button", {name:"전송 ↑", exact:true}).waitFor();
+    const afterSend = await readTurns();
+    assert.deepEqual(afterSend.slice(0,-1), beforeEdit);
+    assert.equal(afterSend.at(-1).provider, "mock");
+    assert.equal(afterSend.at(-1).message, "고친 질문으로 재전송");
+    const interruptedQuestion = "연결 종료 뒤 편집할 질문 ".repeat(100).trim();
+    await composer.fill(interruptedQuestion);
+    await page.getByRole("button", {name:"전송"}).click();
+    const interruptedTurn = page.getByRole("article").filter({hasText:interruptedQuestion});
+    await interruptedTurn.getByText("응답 중", {exact:true}).waitFor();
+    assert.equal(await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).count(), 0);
+    await stop("SIGKILL");
+    await start(new URL(base).port);
+    await page.reload();
+    await interruptedTurn.getByText("연결 종료로 중단됨", {exact:true}).waitFor();
+    await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).click();
+    assert.equal(await composer.inputValue(), interruptedQuestion);
+    assert.equal((await readTurns()).length, afterSend.length + 1);
     assert.deepEqual(pageErrors, []);
   },
 );

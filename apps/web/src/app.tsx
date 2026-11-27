@@ -132,11 +132,18 @@ function Conversation({
   const [pendingId, setPendingId] = useState("");
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   const sending = useRef(false);
   const draftVersion = useRef(0);
   function editDraft(value: string) {
     draftVersion.current++;
     setText(value);
+  }
+  function restoreQuestion(message: string) {
+    if (text !== message && !text.endsWith(`\n\n${message}`)) {
+      editDraft(text ? `${text}\n\n${message}` : message);
+    }
+    composerInput.current?.focus();
   }
   const remoteStreaming = !busy && turns.some((t) => t.status === "streaming");
   useEffect(() => {
@@ -316,7 +323,16 @@ function Conversation({
                 </small>
               </div>
               <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />
-              {t.status !== "completed" && <small className="status">{turnStatusLabels[t.status]}</small>}
+              {t.status !== "completed" && (
+                <div className="turn-status">
+                  <small className="status">{turnStatusLabels[t.status]}</small>
+                  {t.status !== "streaming" && (
+                    <button type="button" onClick={() => restoreQuestion(t.message)}>
+                      {text ? "초안 끝에 질문 추가" : "질문 다시 편집"}
+                    </button>
+                  )}
+                </div>
+              )}
             </article>
           ))}
           <div ref={end} />
@@ -332,6 +348,7 @@ function Conversation({
         <AttachedReferences token={token} session={session.id} references={references} />
         <form onSubmit={send}>
           <textarea
+            ref={composerInput}
             disabled={!ready}
             aria-label="메시지"
             placeholder="메시지 입력"
