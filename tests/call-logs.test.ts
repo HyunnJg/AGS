@@ -21,6 +21,8 @@ test("호출별 본문과 답변은 독립적으로 제한되며 비밀값 제�
   a.bytes(Buffer.from(`${"a".repeat(65533)}fix`));
   a.bytes(Buffer.from("ture-password"));
   a.answer("답".repeat(70000));
+  a.recordTokens("outputTokens", 7);
+  a.recordTokens("cachedInputTokens", 0);
   b.answer("두 번째 호출");
   b.finish("cancelled");
   a.finish("timeout");
@@ -38,6 +40,12 @@ test("호출별 본문과 답변은 독립적으로 제한되며 비밀값 제�
   db.close();
   db = new SessionStore(path);
   assert.equal(db.logsEnabled(), false);
+  const summaries = db.callList();
+  assert.ok(summaries.every(row => !("usage" in row)));
+  assert.deepEqual(db.callList(true), [
+    { ...summaries[0], usage: { outputTokens: 7, cachedInputTokens: 0 } },
+    summaries[1],
+  ]);
   assert.equal(db.callDetails(first.id)[0]?.body, first.body);
   db.setLogsEnabled(true);
   for (let n = 0; n < 101; n++) start()?.finish("completed");

@@ -1180,7 +1180,7 @@ test(
     assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), matching.map(r => r.id));
     await page.getByText(`${list.length}건 중 ${matching.length}건`, { exact: true }).waitFor();
     await logPicker.selectOption(sample.id);
-    const refreshLogs = page.waitForResponse(r => r.url() === `${base}/api/call-logs` && r.request().method() === "GET");
+    const refreshLogs = page.waitForResponse(r => r.url() === `${base}/api/call-logs?usage=1` && r.request().method() === "GET");
     await page.getByRole("button", { name: "목록 새로고침" }).click();
     assert.equal((await refreshLogs).status(), 200);
     assert.equal(await logPicker.inputValue(), sample.id);
@@ -1199,6 +1199,8 @@ test(
     await detail.locator("pre").filter({ hasText: "[DONE]" }).waitFor();
     assert.match(await detail.locator("pre").nth(0).innerText(), /text\/event-stream/);
     assert.equal(await detail.locator("pre").nth(2).innerText(), "복원 확인");
+    await page.getByText("필터 결과 토큰 사용량", { exact: true }).click();
+    const totalsTable = page.getByRole("table", { name: "필터 결과 토큰 사용량" });
     const filteredButton = page.getByRole("button", { name: "필터 결과 JSON 다운로드" });
     for (const button of ["이 호출 JSON 다운로드", "필터 결과 JSON 다운로드", "전체 JSON 다운로드"]) {
       const file = page.waitForEvent("download");
@@ -1208,6 +1210,12 @@ test(
       if (button === "필터 결과 JSON 다운로드") {
         assert.match(downloaded.suggestedFilename(), /^AGS-calls-filtered-/);
         assert.ok(Array.isArray(data));
+        for (const [key, label] of [["totalTokens", "합계"], ["cachedInputTokens", "캐시 읽기"]]) {
+          const values = data.map(item => item.usage?.[key]).filter(n => n !== undefined);
+          const row = totalsTable.getByRole("row").filter({ has: page.getByRole("rowheader", { name: label, exact: true }) });
+          assert.equal(await row.getByRole("cell").nth(0).innerText(), values.reduce((a, b) => a + b, 0).toLocaleString());
+          assert.equal(await row.getByRole("cell").nth(1).innerText(), `${values.length} / ${data.length}건`);
+        }
       }
       const row = Array.isArray(data) ? data.find((item) => item.id === sample.id) : data;
       assert.equal(row.answer, "복원 확인");
@@ -1228,6 +1236,8 @@ test(
       assert.ok(!JSON.stringify(data).includes("fixture-only"));
     }
     await providerFilter.selectOption("mock");
+    await page.getByText("이 조건에 해당하는 모델 API 호출이 없습니다.").waitFor();
+    assert.equal(await totalsTable.count(), 0);
     await statusFilter.selectOption("timeout");
     await page.getByText("조건에 맞는 호출이 없습니다.").waitFor();
     assert.ok(await filteredButton.isDisabled());
