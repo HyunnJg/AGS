@@ -34,7 +34,10 @@
 | POST /api/sessions | 일반 프리셋의 빈 세션 생성 (201) |
 | GET /api/sessions/{id} | 세션 설정과 시간순 턴 기록 |
 | PATCH /api/sessions/{id} | JSON의 preset 값 변경. 다음 턴부터 적용 |
+| PUT /api/sessions/{id}/title | 이전 이름과 새 이름을 받아 대화 이름 변경 |
 | POST /api/sessions/{id}/chat | 기존 채팅 SSE 형식으로 응답하며 DB에 턴 저장. 같은 세션에서 응답 진행 중이면 409 |
+
+`PUT /api/sessions/{id}/title`에 `{previous,title}`을 보내면 저장한 `{title}`을 돌려준다. 새 이름은 앞뒤 공백을 제외한 한 줄(최대 80 UTF-16 코드 단위)이다. 현재 이름이 이미 목표와 같으면 재시도도 성공하며, 다른 이름으로 변경됐다면 HTTP 409와 최신 이름을 반환한다. 첫 메시지 전에 직접 저장한 이름은 첫 전송 뒤에도 유지된다.
 
 세션 채팅의 X-Request-ID는 저장된 턴 ID와 같고, 중단은 기존 취소 경로를 사용한다. done은 completed, cancelled는 cancelled, error는 failed 상태로 저장한다. 비정상 종료 후에도 streaming으로 남은 턴은 다음 시작 시 interrupted로 복구한다. 개별 요청만 검증하는 기존 POST /api/chat은 기록 없이 사용할 수 있다.
 

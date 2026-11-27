@@ -15,7 +15,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
-import { type Session, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
+import { type Session, validSessionTitle, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
 import { isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
@@ -424,11 +424,21 @@ export function createChatServer(
       return json(store.references(sessionId));
     }
     const route =
-      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources)?$/.exec(
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title)?$/.exec(
         path,
       );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/title") {
+      if (req.method !== "PUT") return allow("PUT");
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || !("title" in body) || !validSessionTitle(body.title) ||
+          !("previous" in body) || typeof body.previous !== "string") throw new RequestError(400, "invalid_title");
+      const title = body.title.trim();
+      if (!store.rename(session.id, body.previous, title))
+        return json({ error: "title_changed", title: store.get(session.id)?.title }, 409);
+      return json({ title });
+    }
     if (session && store && route?.[2] === "/checkpoint") {
       if (req.method !== "POST") return allow("POST");
       const body = await readBody(req);
