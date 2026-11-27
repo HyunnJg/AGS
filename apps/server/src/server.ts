@@ -377,11 +377,18 @@ export function createChatServer(
       }
       return allow("GET, POST");
     }
-    const reviewRoute = /^\/api\/sessions\/([a-f0-9-]{36})\/review(\/history)?$/.exec(path);
+    const reviewRoute = /^\/api\/sessions\/([a-f0-9-]{36})\/review(?:\/(history|[a-f0-9-]{36}))?$/.exec(path);
     if (reviewRoute?.[1] && store) {
       const id = reviewRoute[1];
       if (!store.get(id)) throw new RequestError(404, "unknown_session");
-      if (reviewRoute[2]) return req.method === "GET" ? json(store.reviewHistory(id)) : allow("GET");
+      const entry = reviewRoute[2];
+      if (entry) {
+        if (req.method !== "GET") return allow("GET");
+        if (entry === "history") return json(store.reviewHistory(id));
+        const result = store.review(id, entry);
+        if (!result) throw new RequestError(404, "unknown_review");
+        return json(result);
+      }
       if (req.method === "GET") return json(store.review(id) ?? null);
       if (req.method !== "POST") return allow("GET, POST");
       const body = await readBody(req);
