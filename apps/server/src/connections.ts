@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +21,10 @@ interface RecordData {
   encrypted?: string;
 }
 
-function dpapi(operation: "Protect" | "Unprotect", values: string[]): string[] {
+const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+const dpapiOptions = { encoding: "utf8", timeout: 30_000, windowsHide: true } as const;
+
+function dpapiArgs(operation: "Protect" | "Unprotect") {
   // Each input line is one base64 value. Preserve its position even if one old key is unreadable.
   const script = `
     $ErrorActionPreference='Stop'
@@ -34,15 +37,14 @@ function dpapi(operation: "Protect" | "Unprotect", values: string[]): string[] {
         [Console]::WriteLine([Convert]::ToBase64String($result))
       } catch { [Console]::WriteLine('-') }
     }`;
-  const result = spawnSync(
-    join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-    ["-NoProfile", "-NonInteractive", "-Command", script],
-    { input: values.join("\n"), encoding: "utf8", timeout: 10000, windowsHide: true },
-  );
+  return ["-NoProfile", "-NonInteractive", "-Command", script];
+}
+
+function unprotectKeys(values: string[]): string[] {
+  const result = spawnSync(powershell, dpapiArgs("Unprotect"), { ...dpapiOptions, input: values.join("\n") });
   if (result.status !== 0 || !result.stdout) throw new Error("key_storage_failed");
   const lines = result.stdout.trimEnd().split(/\r?\n/);
-  if (lines.length !== values.length || (operation === "Protect" && lines.includes("-")))
-    throw new Error("key_storage_failed");
+  if (lines.length !== values.length) throw new Error("key_storage_failed");
   return lines;
 }
 
@@ -52,6 +54,20 @@ export class ConnectionError extends Error {
     super(code);
     this.status = status;
   }
+}
+
+function protectKey(key: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fail = () => reject(new ConnectionError(503, "key_storage_failed"));
+    const child = execFile(powershell, dpapiArgs("Protect"), dpapiOptions, (error, stdout) => {
+      if (error) return fail();
+      const encrypted = stdout.trimEnd();
+      if (!/^[A-Za-z0-9+/]+=*$/.test(encrypted)) fail();
+      else resolve(encrypted);
+    });
+    child.stdin?.once("error", fail);
+    child.stdin?.end(Buffer.from(key, "utf8").toString("base64"));
+  });
 }
 
 export class Connections {
@@ -77,7 +93,7 @@ export class Connections {
     );
     if (windows && encrypted.length) {
       try {
-        const keys = dpapi("Unprotect", encrypted.map(item => item.value));
+        const keys = unprotectKeys(encrypted.map(item => item.value));
         encrypted.forEach(({ id }, index) => {
           const value = keys[index];
           if (value && value !== "-") this.keys.set(id, Buffer.from(value, "base64").toString("utf8"));
@@ -128,7 +144,7 @@ export class Connections {
       persistentKeys: windows,
     };
   }
-  save(id: ConnectionId, body: unknown) {
+  async save(id: ConnectionId, body: unknown) {
     const old = this.records.get(id) ?? this.defaults(id);
     if (
       !body ||
@@ -172,9 +188,10 @@ export class Connections {
       record.source = typeof input === "string" ? "supplied" : "none";
       delete record.encrypted;
       if (windows && typeof input === "string") {
-        const [encrypted] = dpapi("Protect", [Buffer.from(input).toString("base64")]);
-        if (!encrypted) throw new Error("key_storage_failed");
-        record.encrypted = encrypted;
+        record.encrypted = await protectKey(input);
+        // Another request may have saved this connection while PowerShell was running.
+        if ((this.records.get(id)?.revision ?? 0) !== old.revision)
+          throw new ConnectionError(409, "settings_changed");
       }
     }
     const dest = this.path(id);

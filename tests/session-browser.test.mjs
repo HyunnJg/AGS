@@ -1041,6 +1041,11 @@ test(
     await page.getByLabel("API 키", { exact: true }).fill("openai-ui-fixture");
     assert.equal(await page.getByLabel("API 기본 주소").count(), 0);
     const previousSelection = await quick.inputValue();
+    await page.route("**/api/settings/connections/openai", route =>
+      route.fulfill({ status: 503, json: { error: "key_storage_failed" } }), { times: 1 });
+    await page.getByRole("button", { name: "연결 저장" }).click();
+    await page.getByText(/Windows에서 API 키를 암호화하지 못했습니다/).waitFor();
+    assert.equal(await page.getByLabel("API 키", { exact: true }).inputValue(), "openai-ui-fixture");
     await page.getByRole("button", { name: "연결 저장" }).click();
     const modelRow = page.getByRole("button", { name: "ui/openai-text", exact: true });
     await modelRow.click();

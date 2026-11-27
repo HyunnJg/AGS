@@ -167,7 +167,7 @@ export function createChatServer(
       const id = connection[1];
       if (req.method === "GET") return json(connections.view(id));
       if (req.method !== "PUT") return allow("GET, PUT");
-      const view = connections.save(id, await readBody(req));
+      const view = await connections.save(id, await readBody(req));
       providers = connections.adapters;
       return json({ view, options: providers.options });
     }

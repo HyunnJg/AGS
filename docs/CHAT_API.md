@@ -109,6 +109,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 
 인증된 `GET /api/settings/connections/{openrouter|openai|gemini|anthropic|custom}`은 `revision`, `baseUrl`, `defaultModel`, 키 등록 여부(`hasKey`), 재입력 필요 여부(`needsKey`), 입력 키의 재시작 후 유지 여부(`persistentKeys`)를 반환한다. `PUT` 본문에는 읽은 revision과 새 baseUrl, defaultModel을 보낸다. OpenRouter, OpenAI, Gemini, Anthropic은 공급자별 고정 주소를 사용한다. OpenAI는 `https://api.openai.com/v1/` 아래의 `models`와 `chat/completions`를 호출한다. 선택 필드 key를 생략하면 기존 키를 유지하고, 문자열로 교체하거나 null로 제거한다. 기존 키가 있을 때 사용자 지정 주소를 바꾸려면 키 교체 또는 제거를 명시해야 한다. 성공 응답은 갱신된 view와 공급자 options이며 오래된 revision은 409다. 공급자 키 원문은 응답에 포함하지 않는다.
 
+Windows 키 암호화가 실패하거나 30초를 넘기면 저장 요청은 503(`key_storage_failed`)을 반환한다. 암호화 도중 같은 공급자의 다른 변경이 먼저 저장되면 409(`settings_changed`)다.
 
 Gemini는 전용 키를 `x-goog-api-key` 헤더로 보내며 `v1beta/models`에서 `generateContent` 지원 모델을 페이지별로 조회한다. 각 HTTP 응답은 별도 호출 로그로 기록한다. 텍스트 호출은 `models/{id}:streamGenerateContent?alt=sse`를 사용한다. 요청 요약의 메시지 수는 AGS의 입력 메시지(시스템 지침 포함) 기준이다. 같은 역할의 연속 메시지는 Google 요청에서 순서대로 한 턴의 여러 텍스트 파트가 된다. 최종 답변에는 첫 후보의 일반 텍스트만 들어가며, 공급자가 반환한 사용량 등은 원본 SSE에 남는다.
 

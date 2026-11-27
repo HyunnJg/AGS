@@ -105,6 +105,7 @@ export async function api(
     if (path.startsWith("/api/settings/connections/")) {
       if (res.status === 409) throw new SettingsConflict();
       const { error } = await res.json().catch(() => ({}));
+      if (error === "key_storage_failed") throw new Error("Windows에서 API 키를 암호화하지 못했습니다. 잠시 후 연결 저장을 다시 눌러 주세요.");
       if (error === "new_endpoint_key") throw new Error("주소가 바뀌었습니다. 새 키를 입력하거나 기존 키 제거를 선택하세요.");
       if (error === "invalid_connection_url") throw new Error("API 기본 주소를 확인하세요. 원격 서버는 HTTPS를 사용하세요.");
       if (error === "invalid_connection") throw new Error("모델 ID와 API 키에 공백이나 허용되지 않는 문자가 있는지 확인하세요.");
