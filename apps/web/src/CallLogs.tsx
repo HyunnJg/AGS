@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
 import { providerNames } from "../../../packages/contracts/src/providers.ts";
 import { BlockBudgetTable } from "./BlockBudgetTable.tsx";
@@ -10,6 +10,24 @@ const statuses = {
   cancelled: "중단",
   timeout: "시간 초과",
 };
+
+function LogFilter({ label, options, value, change }: {
+  label: string;
+  options: Record<string, string>;
+  value: string;
+  change: (value: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(event) => change(event.target.value)}>
+        <option value="">전체</option>
+        {Object.entries(options).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+      </select>
+    </div>
+  );
+}
 
 function download(value: unknown, filename: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
@@ -114,6 +132,17 @@ export function CallLogs({ token }: { token: string }) {
   const [enabled, setEnabled] = useState<boolean>();
   const [busy, setBusy] = useState(false);
   const [id, setId] = useState("");
+  const [filters, setFilters] = useState({ provider: "", kind: "", status: "" });
+  const visibleRows = rows?.filter((row) =>
+    (!filters.provider || row.provider === filters.provider) &&
+    (!filters.kind || row.kind === filters.kind) &&
+    (!filters.status || row.status === filters.status)
+  ) ?? [];
+  const selectedId = visibleRows.find((row) => row.id === id)?.id ?? visibleRows[0]?.id;
+  function changeFilter(key: keyof typeof filters, value: string) {
+    setId(selectedId ?? "");
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
   const [error, setError] = useState("");
   const [query, refresh] = useState({ path: "/api/call-logs" });
   const [loading, setLoading] = useState(true);
@@ -127,7 +156,6 @@ export function CallLogs({ token }: { token: string }) {
         if (c.signal.aborted) return;
         setRows(items);
         setEnabled(setting.enabled);
-        setId((current) => (items.some((r) => r.id === current) ? current : (items[0]?.id ?? "")));
         setError("");
       })
       .catch(() => {
@@ -138,7 +166,8 @@ export function CallLogs({ token }: { token: string }) {
       });
     return () => c.abort();
   }, [token, query]);
-  function reload() {
+  function reload(keepId = selectedId ?? "") {
+    setId(keepId);
     setLoading(true);
     refresh({ path: "/api/call-logs" });
   }
@@ -159,8 +188,7 @@ export function CallLogs({ token }: { token: string }) {
       else if (command === "clear") {
         await api(token, "/api/call-logs", "DELETE");
         setRows([]);
-        setId("");
-        reload();
+        reload("");
       } else {
         const response = await api(token, "/api/settings/call-logs", "PUT", { enabled: !enabled });
         setEnabled((await response.json()).enabled);
@@ -190,7 +218,7 @@ export function CallLogs({ token }: { token: string }) {
       </label>
       <small>최근 종료된 호출 100건을 이 PC에 보관합니다.</small>
       <div>
-        <button type="button" disabled={busy || loading} onClick={reload}>
+        <button type="button" disabled={busy || loading} onClick={() => reload()}>
           목록 새로고침
         </button>{" "}
         <button
@@ -205,29 +233,45 @@ export function CallLogs({ token }: { token: string }) {
           disabled={busy || loading || !rows?.length}
           onClick={() => void action("clear")}
         >
-          로그 비우기
+          로그 전체 비우기
         </button>
       </div>
       {error && <p role="alert">{error}</p>}
       {!rows && !error && <output>목록을 읽는 중…</output>}
-      {rows &&
-        (rows.length ? (
-          <label>
-            호출 선택
-            <select value={id} onChange={(e) => setId(e.target.value)}>
-              {rows.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {new Date(r.started).toLocaleString()} · {callKinds[r.kind]} · {providerNames[r.provider]}{" "}
-                  {r.model} · {statuses[r.status]}
-                  {r.httpStatus ? ` · ${r.httpStatus}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <p>아직 기록된 호출이 없습니다.</p>
-        ))}
-      {id && <CallDetail key={id} id={id} token={token} />}
+      {rows && rows.length > 0 && (
+        <>
+          <fieldset className="call-log-filters" aria-label="호출 필터">
+            <LogFilter label="공급자" options={providerNames} value={filters.provider} change={(v) => changeFilter("provider", v)} />
+            <LogFilter label="호출 종류" options={callKinds} value={filters.kind} change={(v) => changeFilter("kind", v)} />
+            <LogFilter label="종료 상태" options={statuses} value={filters.status} change={(v) => changeFilter("status", v)} />
+          </fieldset>
+          {(filters.provider || filters.kind || filters.status) && (
+            <div>
+              <output>{rows.length}건 중 {visibleRows.length}건</output>{" "}
+              <button type="button" onClick={() => {
+                setId(selectedId ?? "");
+                setFilters({ provider: "", kind: "", status: "" });
+              }}>필터 초기화</button>
+            </div>
+          )}
+          {selectedId ? (
+            <label>
+              호출 선택
+              <select value={selectedId} onChange={(e) => setId(e.target.value)}>
+                {visibleRows.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {new Date(r.started).toLocaleString()} · {callKinds[r.kind]} · {providerNames[r.provider]}{" "}
+                    {r.model} · {statuses[r.status]}
+                    {r.httpStatus ? ` · ${r.httpStatus}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : <p>조건에 맞는 호출이 없습니다.</p>}
+        </>
+      )}
+      {rows?.length === 0 && <p>아직 기록된 호출이 없습니다.</p>}
+      {selectedId && <CallDetail key={selectedId} id={selectedId} token={token} />}
     </div>
   );
 }
