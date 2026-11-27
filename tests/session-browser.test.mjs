@@ -260,9 +260,29 @@ test(
     assert.ok(await downloadRange.isDisabled());
     await page.keyboard.press("Escape");
     await page.getByLabel("프리셋").selectOption("coding");
-    await page.getByLabel("메시지").fill("첫 작업");
+    const composer = page.getByRole("textbox", {name:"메시지", exact:true});
+    const followupDraft = "첫 대화의 초안\n아직 전송 전";
+    await composer.fill("첫 작업");
+    await page.route("**/api/sessions/*/chat", route => route.fulfill({ status: 503 }), {times:1});
     await page.getByRole("button", { name: "전송" }).click();
+    await page.getByRole("alert").filter({hasText:"503"}).waitFor();
+    await page.reload();
+    await page.getByRole("heading", {name:"새 대화", exact:true}).waitFor();
+    assert.equal(await composer.inputValue(), "첫 작업");
+
+    const pendingSend = Promise.withResolvers();
+    const releaseSend = Promise.withResolvers();
+    await page.route("**/api/sessions/*/chat", async route => {
+      pendingSend.resolve();
+      await releaseSend.promise;
+      await route.continue();
+    }, {times:1});
+    await page.getByRole("button", { name: "전송" }).click();
+    await pendingSend.promise;
+    await composer.fill(followupDraft);
+    releaseSend.resolve();
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
+    assert.equal(await composer.inputValue(), followupDraft);
     await page.getByRole("button", { name: "새 대화" }).click();
     await page.getByRole("heading", { name: "새 대화", exact: true }).waitFor();
     const long = "다음 작업 ".repeat(150);
@@ -273,14 +293,37 @@ test(
     await page.getByText("중단됨", { exact: true }).waitFor();
     const partial = await page.locator(".reply").innerText();
     assert.ok(partial.length > 0 && partial.length < long.length);
+    assert.equal(await composer.inputValue(), "");
+    await composer.fill("두 번째 대화의 초안");
     await stop();
     await start(new URL(base).port);
     await page.reload();
     await page.getByText("중단됨", { exact: true }).waitFor();
     assert.equal(await page.locator(".reply").innerText(), partial);
     assert.equal(await page.getByLabel("프리셋").inputValue(), "general");
+    assert.equal(await composer.inputValue(), "두 번째 대화의 초안");
     await page.getByRole("button", { name: "첫 작업", exact: true }).click();
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
+    assert.equal(await composer.inputValue(), followupDraft);
+    await composer.fill("");
+    await page.reload();
+    await page.getByRole("heading", {name:"첫 작업", exact:true}).waitFor();
+    assert.equal(await composer.inputValue(), "");
+    // A quota error should keep the latest draft editable and remove its obsolete saved copy.
+    await composer.fill("교체할 초안");
+    await page.evaluate(() => {
+      const write = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key.startsWith("ags-draft:")) throw new DOMException("quota", "QuotaExceededError");
+        write.call(this, key, value);
+      };
+    });
+    await composer.fill("탭 메모리에 남은 초안");
+    await page.getByRole("alert").filter({hasText:"초안을 탭에 저장하지 못했습니다"}).waitFor();
+    assert.equal(await composer.inputValue(), "탭 메모리에 남은 초안");
+    await page.reload();
+    await page.getByRole("heading", {name:"첫 작업", exact:true}).waitFor();
+    assert.equal(await composer.inputValue(), "");
     assert.equal(await page.getByLabel("프리셋").inputValue(), "coding");
     const selectProfile = page.waitForResponse(r => r.request().method() === "PATCH" && r.request().postDataJSON()?.preset?.startsWith("custom-"));
     await page.getByLabel("프리셋", {exact:true}).selectOption({label:"History EN"});

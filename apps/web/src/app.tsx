@@ -92,6 +92,7 @@ function Conversation({
   onReviewer,
   text,
   setText,
+  draftUnsaved,
   visible,
 }: {
   token: string;
@@ -107,6 +108,7 @@ function Conversation({
   onRemoteActivity: (id: string, active: boolean) => void;
   text: string;
   setText: (value: string) => void;
+  draftUnsaved: boolean;
 }) {
   const choices: ModelSelection[] = [];
   for (const option of options) {
@@ -131,6 +133,11 @@ function Conversation({
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const sending = useRef(false);
+  const draftVersion = useRef(0);
+  function editDraft(value: string) {
+    draftVersion.current++;
+    setText(value);
+  }
   const remoteStreaming = !busy && turns.some((t) => t.status === "streaming");
   useEffect(() => {
     if (!remoteStreaming) return;
@@ -178,6 +185,7 @@ function Conversation({
     e.preventDefault();
     const message = text.trim();
     if (!message || savingPreset || sending.current || remoteStreaming || !ready || !providerEnabled) return;
+    const submittedVersion = draftVersion.current;
     sending.current = true;
     setBusy(true);
     activity(session.id, true);
@@ -194,7 +202,7 @@ function Conversation({
       if (r.headers.get("x-ags-section-state") === "stale") setError(staleStateMessage);
       const id = r.headers.get("x-request-id") ?? "";
       setPendingId(id);
-      setText("");
+      if (draftVersion.current === submittedVersion) setText("");
       setTurns((prev) => [
         ...prev,
         {
@@ -318,7 +326,7 @@ function Conversation({
         <ReviewEditor token={token} session={session}
           choices={reviewChoices} references={references.refs}
           turns={turns}
-          insert={value=>setText(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
+          insert={value=>editDraft(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
         {session.sectionId && <CheckpointEditor token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} references={references} />
@@ -328,7 +336,7 @@ function Conversation({
             aria-label="메시지"
             placeholder="메시지 입력"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => editDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -336,6 +344,7 @@ function Conversation({
               }
             }}
           />
+          {draftUnsaved && <small role="alert">초안을 탭에 저장하지 못했습니다. 새로고침 전에 복사해 두세요.</small>}
           {!providerEnabled && <small>{providerNames[session.provider]} 연결을 확인하거나 다른 모델을 선택하세요.</small>}
           <div className="actions">
             <select
@@ -381,6 +390,19 @@ function Conversation({
   );
 }
 
+type ChatDraft = { text: string; unsaved: boolean };
+
+function restoreDrafts(sessions: Session[]) {
+  const drafts: Record<string, ChatDraft> = {};
+  try {
+    for (const { id } of sessions) {
+      const text = sessionStorage.getItem(`ags-draft:${id}`);
+      if (text) drafts[id] = { text, unsaved: false };
+    }
+  } catch { /* Keep the workspace usable if the browser refuses a draft read. */ }
+  return drafts;
+}
+
 function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -396,7 +418,20 @@ function Workspace({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [options, setOptions] = useState<ProviderOption[]>([]);
   const ready = sessionsReady && options.length > 0;
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, ChatDraft>>({});
+  function saveDraft(id: string, text: string) {
+    const key = `ags-draft:${id}`;
+    let unsaved = false;
+    try {
+      if (text) sessionStorage.setItem(key, text);
+      else sessionStorage.removeItem(key);
+    } catch {
+      unsaved = true;
+      // If the new text exceeds quota, do not restore an older version on reload.
+      try { sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
+    }
+    setDrafts(prev => ({ ...prev, [id]: { text, unsaved } }));
+  }
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [displayRules, setDisplayRules] = useState<DisplayRule[]>([]);
@@ -454,6 +489,7 @@ function Workspace({ token }: { token: string }) {
       try {
         const rows: Session[] = await (await api(token, "/api/sessions")).json();
         if (alive) {
+          setDrafts(restoreDrafts(rows));
           setSessions(rows);
           select(rows.find((s) => s.id === sessionStorage.getItem("ags-session"))?.id ?? rows[0]?.id ?? "");
           setSessionsReady(true);
@@ -568,7 +604,7 @@ function Workspace({ token }: { token: string }) {
           token={token}
           selection={currentSession ?? { provider: "mock", model: "" }}
           session={currentSession}
-          draft={drafts[id] ?? ""}
+          draft={drafts[id]?.text ?? ""}
           streaming={running.includes(id) || Boolean(id && remoteId === id)}
           options={options}
           close={() => setSettings(false)}
@@ -585,8 +621,9 @@ function Workspace({ token }: { token: string }) {
             session={current}
             activity={activity}
             visible={current.id === id}
-            text={drafts[current.id] ?? ""}
-            setText={(value) => setDrafts((prev) => ({ ...prev, [current.id]: value }))}
+            text={drafts[current.id]?.text ?? ""}
+            draftUnsaved={drafts[current.id]?.unsaved ?? false}
+            setText={value => saveDraft(current.id, value)}
             onReviewer={async (reviewer, open) => {
               try {
                 const data = await (await api(token,`/api/sessions/${reviewer}`)).json();
