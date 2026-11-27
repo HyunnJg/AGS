@@ -959,10 +959,16 @@ test(
     await detail.locator("pre").filter({ hasText: "[DONE]" }).waitFor();
     assert.match(await detail.locator("pre").nth(0).innerText(), /text\/event-stream/);
     assert.equal(await detail.locator("pre").nth(2).innerText(), "복원 확인");
-    for (const button of ["이 호출 JSON 다운로드", "전체 JSON 다운로드"]) {
+    const filteredButton = page.getByRole("button", { name: "필터 결과 JSON 다운로드" });
+    for (const button of ["이 호출 JSON 다운로드", "필터 결과 JSON 다운로드", "전체 JSON 다운로드"]) {
       const file = page.waitForEvent("download");
       await page.getByRole("button", { name: button }).click();
-      const data = JSON.parse(await readFile(await (await file).path(), "utf8"));
+      const downloaded = await file;
+      const data = JSON.parse(await readFile(await downloaded.path(), "utf8"));
+      if (button === "필터 결과 JSON 다운로드") {
+        assert.match(downloaded.suggestedFilename(), /^AGS-calls-filtered-/);
+        assert.ok(Array.isArray(data));
+      }
       const row = Array.isArray(data) ? data.find((item) => item.id === sample.id) : data;
       assert.equal(row.answer, "복원 확인");
       assert.deepEqual(row.usage, {
@@ -971,7 +977,8 @@ test(
       assert.equal(row.contextBudget.estimatedInput, restored.estimatedInput);
       assert.deepEqual(row.contextBudget.blockUsage, restored.blockUsage);
       if (Array.isArray(data)) {
-        assert.deepEqual(data.map(item => item.id), list.map(item => item.id));
+        const expected = button === "필터 결과 JSON 다운로드" ? matching : list;
+        assert.deepEqual(data.map(item => item.id), expected.map(item => item.id));
         assert.ok(data.filter((item) => item.kind !== "chat" || item.provider === "mock")
           .every((item) => !("contextBudget" in item)));
       }
@@ -983,9 +990,11 @@ test(
     await providerFilter.selectOption("mock");
     await statusFilter.selectOption("timeout");
     await page.getByText("조건에 맞는 호출이 없습니다.").waitFor();
+    assert.ok(await filteredButton.isDisabled());
     assert.equal(await logPicker.count(), 0);
     assert.equal(await detail.count(), 0);
     await page.getByRole("button", { name: "필터 초기화" }).click();
+    assert.equal(await filteredButton.count(), 0);
     assert.equal(await logPicker.locator("option").count(), list.length);
     await logPicker.selectOption(sample.id);
     const clear = page.getByRole("button", { name: "로그 전체 비우기" });

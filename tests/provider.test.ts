@@ -305,6 +305,16 @@ test(
     );
     assert.deepEqual(exported.find((row: { id: string }) => row.id === trimmedId).contextBudget, expectedBudget);
     const authFailure = exported.find((log: { httpStatus: number }) => log.httpStatus === 401);
+    const exportSelection = (ids: unknown) => call("/api/call-logs/export", "POST", { ids });
+    const selectedIds = [trimmedId, authFailure.id];
+    const subset = await exportSelection(selectedIds);
+    assert.equal(subset.status, 200);
+    assert.deepEqual(await subset.json(), exported.filter((row: { id: string }) => selectedIds.includes(row.id)));
+    for (const ids of [[], "invalid", [null], ["bad-id"], [authFailure.id, authFailure.id], Array(101).fill(authFailure.id)])
+      assert.equal((await exportSelection(ids)).status, 400);
+    const stale = await exportSelection([authFailure.id, "00000000-0000-0000-0000-000000000000"]);
+    assert.equal(stale.status, 409);
+    assert.deepEqual(await stale.json(), { error: "call_selection_changed" });
     assert.equal(authFailure.headers["set-cookie"], "[가림]");
     assert.equal(authFailure.headers["x-request-id"], "fixture-request");
     assert.equal(JSON.parse(authFailure.body).error, "fixture-error");
