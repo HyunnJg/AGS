@@ -18,6 +18,7 @@ test(
     const token = randomBytes(32).toString("hex");
     const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
+    const longReply = `공유할 문단\n${"검토에 보내지 않을 내용\n".repeat(700)}직접 연결 응답`;
     const fake = createServer(async (req, res) => {
       if (req.url?.startsWith("/anthropic/")) {
         assert.equal(req.headers.authorization, "Bearer anthropic-ui-fixture");
@@ -57,7 +58,7 @@ test(
         const request = JSON.parse(Buffer.concat(chunks).toString());
         const review = request.systemInstruction.parts[0].text.startsWith("독립 검토자");
         if (review) {
-          assert.deepEqual(request.contents, [{role:"user", parts:[{text:"선택한 문단 검토"}]}]);
+          assert.deepEqual(request.contents, [{role:"user", parts:[{text:"선택한 문단 검토\n\n공유할 문단"}]}]);
           assert.equal(request.generationConfig.maxOutputTokens, 1200);
         }
         const text = review ? "선택 문단 검토 완료" : "Gemini 대화 응답";
@@ -86,7 +87,8 @@ test(
           assert.deepEqual(payload.messages.slice(1), [{ role: "user", content: "직접 연결 검토 확인" }]);
         }
         res.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "openai-local-1" });
-        res.end('data: {"choices":[{"delta":{"content":"직접 연결 응답"}}]}\n\ndata: {"choices":[],"usage":{"total_tokens":24}}\n\ndata: [DONE]\n\n');
+        const content = payload.messages[0].content.startsWith("독립 검토자") ? "직접 연결 응답" : longReply;
+        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: {"choices":[],"usage":{"total_tokens":24}}\n\ndata: [DONE]\n\n`);
         return;
       }
       assert.equal(req.headers.authorization, "Bearer fixture-only");
@@ -1032,7 +1034,7 @@ test(
     await switchModel("openai", "ui/openai-text");
     await page.getByLabel("메시지", { exact: true }).fill("직접 연결 테스트");
     await page.getByRole("button", {name:"전송"}).click();
-    await page.getByText("직접 연결 응답", { exact: true }).waitFor();
+    await page.locator(".reply").filter({ hasText: "공유할 문단" }).waitFor();
     await switchModel("mock", "");
     await editor.locator("summary").first().click();
     await editor.getByRole("combobox").selectOption(JSON.stringify(["openai", "ui/openai-text"]));
@@ -1123,7 +1125,27 @@ test(
     await page.getByText("Gemini 대화 응답", {exact:true}).waitFor();
     await switchModel("openai", "ui/openai-text");
     await editor.getByRole("combobox").selectOption(JSON.stringify(["gemini", "gemini-fixture"]));
-    await editor.getByLabel("검토 모델에 보낼 내용").fill("선택한 문단 검토");
+    await reviewDraft.fill("선택한 문단 검토");
+    await editor.getByText("대화 답변에서 발췌", { exact: true }).click();
+    const source = editor.getByLabel("발췌할 답변");
+    const sourceText = editor.getByLabel("답변 원문에서 보낼 부분 선택");
+    const appendExcerpt = editor.getByRole("button", { name: "선택한 부분을 검토 초안에 추가" });
+    assert.equal(await sourceText.inputValue(), "Gemini 대화 응답");
+    const earlierId = await source.getByRole("option", { name: /직접 연결 테스트/ }).getAttribute("value");
+    await source.selectOption(earlierId);
+    assert.equal(await sourceText.inputValue(), longReply);
+    assert.ok(longReply.length > 8000);
+    await sourceText.press("Control+a");
+    await appendExcerpt.click();
+    await editor.getByText(/선택 범위나 초안을 줄이세요/).waitFor();
+    assert.equal(await reviewDraft.inputValue(), "선택한 문단 검토");
+    await sourceText.evaluate(field => {
+      field.focus();
+      field.setSelectionRange(0, "공유할 문단".length);
+    });
+    await appendExcerpt.click();
+    assert.equal(await reviewDraft.inputValue(), "선택한 문단 검토\n\n공유할 문단");
+    await editor.getByText("대화 답변에서 발췌", { exact: true }).click();
     const approved = page.waitForResponse(r => r.url().endsWith("/review") && r.request().method() === "POST");
     await editor.getByRole("button", {name:"승인하고 검토 요청"}).click();
     const independent = await (await approved).json();
