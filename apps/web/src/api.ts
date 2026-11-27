@@ -1,3 +1,10 @@
+export class TitleConflict extends Error {
+  currentTitle: string;
+  constructor(currentTitle: string) {
+    super(`현재 이름이 ‘${currentTitle}’(으)로 바뀌었습니다. 입력한 이름으로 바꾸려면 다시 저장하세요.`);
+    this.currentTitle = currentTitle;
+  }
+}
 export class SearchResultChanged extends Error {}
 export class WriteConflict extends Error {}
 export class SettingsConflict extends Error {
@@ -88,6 +95,10 @@ export async function api(
       sessionStorage.removeItem("ags-token");
       window.dispatchEvent(new Event("ags-unauthorized"));
       throw new Error("로컬 인증 토큰을 확인해 주세요.");
+    }
+    if (path.endsWith("/title") && res.status === 409) {
+      const { title } = await res.json();
+      throw new TitleConflict(title);
     }
     if (path.startsWith("/api/projects") || path.endsWith("/checkpoint") || path.endsWith("/review")) {
       const body = await res.json().catch(() => ({}));

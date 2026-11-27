@@ -20,11 +20,18 @@ import { defaultLimits, type ContextLimits } from "../../../packages/contracts/s
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
-import { isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
+import { defaultSessionTitle, isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 8;
+export const sessionSchemaVersion = 9;
 
-const sessionQuery = `SELECT sessions.*, projects.name || ' / ' || sections.name AS sectionLabel
+// Before v9, an untouched session stored its placeholder as a real title.
+export function migrateUntitledSessions(db: DatabaseSync) {
+  db.prepare("UPDATE sessions SET title='' WHERE title=? AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id=sessions.id)")
+    .run(defaultSessionTitle);
+}
+
+const displayedTitle = `COALESCE(NULLIF(sessions.title,''),'${defaultSessionTitle}')`;
+const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId, projects.name || ' / ' || sections.name AS sectionLabel
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
   LEFT JOIN projects ON sections.projectId=projects.id`;
 
@@ -144,6 +151,10 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 7) {
         this.db.exec("ALTER TABLE custom_presets ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)); PRAGMA user_version=8");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 8) {
+        migrateUntitledSessions(this.db);
+        this.db.exec("PRAGMA user_version=9");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -483,7 +494,7 @@ export class SessionStore {
   create(selection: ModelSelection = { provider: "mock", model: "" }, sectionId: string | null = null) {
     const session: Session = {
       id: randomUUID(),
-      title: "새 대화",
+      title: defaultSessionTitle,
       preset: "general",
       provider: selection.provider,
       model: selection.model,
@@ -491,7 +502,7 @@ export class SessionStore {
     };
     this.db
       .prepare("INSERT INTO sessions(id,title,preset,provider,model,sectionId) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(session.id, session.title, session.preset, session.provider, session.model, sectionId);
+      .run(session.id, "", session.preset, session.provider, session.model, sectionId);
     return this.get(session.id) ?? session;
   }
   get(id: string) {
@@ -630,6 +641,10 @@ export class SessionStore {
     this.db.prepare("INSERT INTO custom_presets(id,name,instructions) VALUES(?,?,?)").run(id, name, instructions);
     return { id, name, instructions };
   }
+  rename(id: string, previous: string, title: string) {
+    return this.db.prepare(`UPDATE sessions SET title=? WHERE id=? AND (${displayedTitle}=? OR title=?)`)
+      .run(title, id, previous, title).changes === 1;
+  }
   setPreset(id: string, preset: Preset) {
     this.db.prepare("UPDATE sessions SET preset=? WHERE id=?").run(preset, id);
   }
@@ -642,9 +657,8 @@ export class SessionStore {
         .run(id, session.id, message, session.preset, session.provider, session.model, session.id);
       if (result.changes) {
         this.db
-          .prepare(`UPDATE sessions SET title=? WHERE id=? AND
-          (SELECT count(*) FROM turns WHERE session_id=?)=1`)
-          .run(Array.from(message.trim()).slice(0, 32).join(""), session.id, session.id);
+          .prepare("UPDATE sessions SET title=? WHERE id=? AND title=''")
+          .run(Array.from(message.trim()).slice(0, 32).join(""), session.id);
       }
       this.db.exec("COMMIT");
       return Boolean(result.changes);

@@ -722,7 +722,12 @@ header h2 {
   .layout nav:has(.session-match-detail) { max-height: 54px; }
 }
 
-.conversation-title { min-width: 0; }
+.conversation-title { min-width: 0; flex: 1; }
+.session-heading, .rename-conversation { display: flex; align-items: center; gap: .45rem; }
+.conversation-title button { flex: none; font-size: .8rem; }
+.rename-conversation { flex-wrap: wrap; }
+.rename-conversation input { flex: 1 1 6rem; width: 6rem; min-width: 0; max-width: 24rem; }
+.rename-conversation [role="alert"] { flex-basis: 100%; }
 .conversation-title small { display: block; color: #53665a; overflow-wrap: anywhere; }
 
 .workspace-search { padding-bottom: .5rem; border-bottom: 1px solid #d5ddd4; }

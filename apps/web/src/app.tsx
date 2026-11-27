@@ -1,3 +1,4 @@
+import { ConversationTitle } from "./ConversationTitle.tsx";
 import { ReviewEditor } from "./ReviewEditor.tsx";
 import { CheckpointEditor } from "./CheckpointEditor.tsx";
 import { staleStateMessage, memoryUseLabel } from "../../../packages/contracts/src/context.ts";
@@ -103,7 +104,7 @@ function Conversation({
 }: {
   token: string;
   session: Session;
-  update: (s: Session) => void;
+  update: (s: Partial<Session> & Pick<Session, "id">, previousTitle?: string) => void;
   activity: (id: string, running: boolean) => void;
   visible: boolean;
   favorites: ModelSelection[];
@@ -171,7 +172,8 @@ function Conversation({
   async function changeSettings(value: { preset: Preset } | ModelSelection) {
     setSavingPreset(true);
     try {
-      update(await (await api(token, path, "PATCH", value)).json());
+      await api(token, path, "PATCH", value);
+      update({ id: session.id, ...value });
       return true;
     } catch (e) {
       setError(problem(e));
@@ -241,7 +243,7 @@ function Conversation({
     } finally {
       try {
         const data = await (await api(token, path)).json();
-        update(data.session);
+        update(data.session, session.title);
         setTurns(data.turns);
       } catch (e) {
         if (accepted)
@@ -269,7 +271,8 @@ function Conversation({
       <header>
         <div className="conversation-title">
           {session.sectionLabel && <small>{session.sectionLabel}</small>}
-          <h2>{session.title}</h2>
+          <ConversationTitle token={token} id={session.id} title={session.title}
+            onTitle={title => update({ id: session.id, title })} />
         </div>
         <label className="preset">
           프리셋{" "}
@@ -489,7 +492,7 @@ function Workspace({ token }: { token: string }) {
       const changed: Session = await (
         await api(token, `/api/sessions/${currentSession.id}`, "PATCH", selection)
       ).json();
-      setSessions((prev) => prev.map((s) => (s.id === changed.id ? changed : s)));
+      setSessions((prev) => prev.map((s) => (s.id === changed.id ? { ...s, provider: changed.provider, model: changed.model } : s)));
     } else {
       const created: Session = await (await api(token, "/api/sessions", "POST", selection)).json();
       setSessions((prev) => [created, ...prev]);
@@ -604,7 +607,12 @@ function Workspace({ token }: { token: string }) {
             favorites={favorites}
             customPresets={customPresets}
             options={options}
-            update={(s) => setSessions((prev) => prev.map((item) => (item.id === s.id ? s : item)))}
+            update={(patch, previousTitle) => setSessions(prev => prev.map(item => {
+              if (item.id !== patch.id) return item;
+              // A chat refresh can arrive after an explicit rename has already succeeded.
+              const title = previousTitle === undefined || previousTitle === item.title ? patch.title : item.title;
+              return { ...item, ...patch, title: title ?? item.title };
+            }))}
           />
         ))
       ) : (

@@ -36,6 +36,13 @@ export function isPresetDraft(value: unknown): value is Pick<CustomPreset, "name
     instructions.isWellFormed() && !instructions.includes("\0");
 }
 
+export const defaultSessionTitle = "새 대화";
+export const maxSessionTitle = 80;
+export function validSessionTitle(value: unknown): value is string {
+  return typeof value === "string" && !!value.trim() && value.trim().length <= maxSessionTitle &&
+    value.isWellFormed() && !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(value);
+}
+
 export interface Session extends ModelSelection {
   sectionId?: string | null;
   sectionLabel?: string | null;

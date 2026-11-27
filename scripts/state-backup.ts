@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { SessionStore, sessionSchemaVersion } from "../apps/server/src/sessions.ts";
+import { SessionStore, migrateUntitledSessions, sessionSchemaVersion } from "../apps/server/src/sessions.ts";
 import { isConnectionId, isModelSelection } from "../packages/contracts/src/providers.ts";
 import { customEndpoint, officialBaseUrls } from "../packages/providers/src/compatible.ts";
 
@@ -141,6 +141,7 @@ async function restoreInto(file: string, stage: string) {
     db.exec("PRAGMA foreign_keys=ON; BEGIN; PRAGMA defer_foreign_keys=ON");
     for (const table of remaining.keys()) db.exec(`DELETE FROM "${table}"`);
     const hash = createHash("sha256");
+    let legacyTitles = false;
     let header = false,
       verified = false;
     let insert: StatementSync | undefined;
@@ -150,12 +151,13 @@ async function restoreInto(file: string, stage: string) {
       if (!Array.isArray(record) || verified) throw invalid();
       const [kind, key, value] = record;
       if (!header) {
-        if (kind !== format || key !== 1 || (value !== 5 && value !== 6 && value !== 7 && value !== schema(db)))
+        if (kind !== format || key !== 1 || (value !== 5 && value !== 6 && value !== 7 && value !== 8 && value !== schema(db)))
           throw new BackupError("이 AGS 버전에서 복원할 수 없는 백업 형식 또는 DB 버전입니다.");
         // v5 shared_prompt rows predate the language column. SQLite supplies its default on insert.
         if (value === 5 || value === 6) remaining.delete("custom_presets");
         if (value === 5) remaining.set("shared_prompt", ["id", "prompt"]);
         if (value === 7) remaining.set("custom_presets", ["id", "name", "instructions"]);
+        legacyTitles = value < 9;
         header = true;
       } else if (kind === "sha256") {
         if (remaining.size || key !== hash.digest("hex")) throw invalid();
@@ -203,6 +205,7 @@ async function restoreInto(file: string, stage: string) {
       db.prepare("PRAGMA integrity_check").get()?.integrity_check !== "ok"
     )
       throw invalid();
+    if (legacyTitles) migrateUntitledSessions(db);
     db.exec("COMMIT");
   } finally {
     lines.close();
