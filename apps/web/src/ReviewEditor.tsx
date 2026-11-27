@@ -7,7 +7,7 @@ import {
   reviewOutputTokens,
   type Review,
 } from "../../../packages/contracts/src/reviews.ts";
-import type { Session } from "../../../packages/contracts/src/sessions.ts";
+import type { Session, Turn } from "../../../packages/contracts/src/sessions.ts";
 import type { FileReference, Project, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import { api } from "./api.ts";
 import { FileWrite } from "./FileWrite.tsx";
@@ -85,12 +85,65 @@ function ReviewResult({
   );
 }
 
+function ReplyExcerpt({ turns, draft, references, insert }: {
+  turns: Turn[];
+  draft: string;
+  references: FileReference[];
+  insert: (value: string) => void;
+}) {
+  const replies = turns.filter(turn => turn.status === "completed" && turn.reply).reverse();
+  const [sourceId, setSourceId] = useState(replies[0]?.id ?? "");
+  const field = useRef<HTMLTextAreaElement>(null);
+  const [notice, setNotice] = useState("");
+  const source = replies.find(turn => turn.id === sourceId) ?? replies[0];
+  if (!source) return <small>완료된 답변이 없습니다.</small>;
+  function append() {
+    if (!field.current) return;
+    const { value, selectionStart, selectionEnd } = field.current;
+    const excerpt = value.slice(selectionStart, selectionEnd);
+    if (!excerpt.trim()) {
+      setNotice("원문에서 검토할 부분을 선택하세요.");
+      return;
+    }
+    const next = draft ? `${draft}\n\n${excerpt}` : excerpt;
+    if (next.length > reviewInputLimit || reviewMessage(next, references).length > reviewInputLimit) {
+      setNotice("첨부 자료를 포함해 8,000자 이내가 되도록 선택 범위나 초안을 줄이세요.");
+      return;
+    }
+    insert(next);
+    setNotice("선택한 부분을 검토 초안에 추가했습니다.");
+  }
+  return (
+    <>
+      <label>
+        발췌할 답변
+        <select value={source.id} onChange={e => {
+          setSourceId(e.target.value);
+          setNotice("");
+        }}>
+          {replies.map((turn, index) => (
+            <option key={turn.id} value={turn.id}>
+              {replies.length - index}. {turn.message.slice(0, 60)} · {providerNames[turn.provider]} {turn.model}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        답변 원문에서 보낼 부분 선택
+        <textarea key={source.id} ref={field} rows={5} readOnly value={source.reply} />
+      </label>
+      <button type="button" onClick={append}>선택한 부분을 검토 초안에 추가</button>
+      {notice && <output>{notice}</output>}
+    </>
+  );
+}
+
 export function ReviewEditor({
   token,
   session,
   choices,
   references,
-  lastReply,
+  turns,
   insert,
   onCreated,
 }: {
@@ -98,12 +151,14 @@ export function ReviewEditor({
   session: Session;
   choices: ModelSelection[];
   references: FileReference[];
-  lastReply: string;
+  turns: Turn[];
   insert: (value: string) => void;
   onCreated: (id: string, open?: boolean) => void;
 }) {
   const route = `/api/sessions/${session.id}/review`;
   const [open, setOpen] = useState(false);
+  const [excerptOpen, setExcerptOpen] = useState(false);
+  const lastReply = turns.findLast(turn => turn.status === "completed")?.reply ?? "";
   const [enabled, setEnabled] = useState(false);
   const [project, setProject] = useState<Project>();
   const [message, setMessage] = useState("");
@@ -248,6 +303,10 @@ export function ReviewEditor({
         >
           마지막 답변 추가
         </button>
+        <details onToggle={e => setExcerptOpen(e.currentTarget.open)}>
+          <summary>대화 답변에서 발췌</summary>
+          {open && excerptOpen && <ReplyExcerpt turns={turns} draft={message} references={selected} insert={setMessage} />}
+        </details>
         {references.length > 0 && (
           <fieldset>
             <legend>함께 보낼 첨부 자료</legend>

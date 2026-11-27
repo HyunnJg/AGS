@@ -743,6 +743,7 @@ header h2 {
 .checkpoint-editor summary { cursor: pointer; }
 .checkpoint-editor fieldset { display: grid; gap: .4rem; margin: .4rem 0; border: 0; padding: 0; }
 .checkpoint-editor textarea { width: 100%; }
+.review-editor select { max-width: 100%; }
 .review-editor[open] { max-height: 46dvh; overflow: auto; }
 .review-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 25dvh; overflow: auto; }
 .checkpoint-editor small, .checkpoint-editor output { overflow-wrap: anywhere; }

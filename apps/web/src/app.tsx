@@ -322,7 +322,7 @@ function Conversation({
       <div className="composer">
         <ReviewEditor token={token} session={session}
           choices={reviewChoices} references={references.refs}
-          lastReply={turns.findLast(t=>t.status==="completed")?.reply ?? ""}
+          turns={turns}
           insert={value=>setText(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
         {session.sectionId && <CheckpointEditor token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
