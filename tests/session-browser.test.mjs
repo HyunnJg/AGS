@@ -992,9 +992,11 @@ test(
     assert.equal((await page.request.patch(freshPath, {headers, data:{provider:"custom",model:"ui/test-model"}})).status(),200);
     assert.equal((await page.request.post(`${freshPath}/chat`,{headers,data:{message:"섹션 복원 검증"}})).status(),200);
     assert.deepEqual(statePayload, restored.messages);
+    assert.ok((await page.request.patch(freshPath, { headers, data: { provider: "custom", model: "ui/other-model" } })).ok());
     const generated=await page.request.post(`${freshPath}/checkpoint`,{headers,data:{action:"draft",provider:"custom",model:"ui/other-model"}});
     assert.equal(generated.status(),200);
     assert.match((await generated.json()).summary,/현장 검수/);
+    assert.ok((await page.request.patch(freshPath, { headers, data: { provider: "custom", model: "ui/test-model" } })).ok());
     await page.getByRole("button", {name:"설정", exact:true}).click();
     await page.getByRole("button", {name:"토글형 모듈"}).click();
     const collab = page.getByLabel("AI 협업 허용");
