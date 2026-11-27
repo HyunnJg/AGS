@@ -791,6 +791,8 @@ header h2 {
 
 .call-logs, .call-detail { display: grid; gap: 10px; min-width: 0; }
 .call-log-filters { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: 8px; }
+.call-log-filters > div { min-width: 0; }
+.call-detail small { overflow-wrap: anywhere; }
 .call-logs .match-case { display: flex; align-items: center; gap: 6px; }
 .call-logs .match-case input { width: auto; }
 .call-detail h4, .call-detail p, .call-detail pre { margin: 0; }
