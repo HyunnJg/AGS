@@ -1,3 +1,4 @@
+import { downloadBlob } from "./download.ts";
 import { useEffect, useId, useState } from "react";
 import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
@@ -31,14 +32,7 @@ function LogFilter({ label, options, value, change }: {
 }
 
 function download(value: unknown, filename: string) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }), filename);
 }
 
 function CallDetail({ token, id, sessionTitle }: { token: string; id: string; sessionTitle?: string }) {

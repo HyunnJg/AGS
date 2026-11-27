@@ -205,6 +205,14 @@ test(
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await page.getByRole("button", { name: "고급 기능" }).click();
     await page.getByText(dir, { exact: true }).waitFor();
+    const exportChat = page.getByRole("button", {name:"대화 Markdown 다운로드"});
+    assert.equal(await exportChat.count(), 0);
+    async function readTranscript() {
+      const pending = page.waitForEvent("download");
+      await exportChat.click();
+      const file = await pending;
+      return { name: file.suggestedFilename(), content: await readFile(await file.path(), "utf8") };
+    }
     await page.getByRole("button", {name: "모델", exact: true}).click();
     await page.getByRole("button", {name: "분야 프리셋"}).click();
     const registeredPresets = page.getByRole("region", {name: "등록된 프리셋"});
@@ -241,6 +249,11 @@ test(
     await page.getByText("기본 응답 언어를 저장했습니다.").waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "첫 대화 시작" }).click();
+    await page.getByRole("button", {name:"설정", exact:true}).click();
+    await page.getByRole("button", {name:"고급 기능"}).click();
+    await exportChat.click();
+    await page.getByText("아직 저장된 메시지가 없습니다.").waitFor();
+    await page.keyboard.press("Escape");
     await page.getByLabel("프리셋").selectOption("coding");
     await page.getByLabel("메시지").fill("첫 작업");
     await page.getByRole("button", { name: "전송" }).click();
@@ -384,15 +397,17 @@ test(
     assert.ok(await page.getByRole("button", { name: "적용", exact: true }).isDisabled());
     await page.getByRole("button", { name: "고급 기능" }).click();
     await page.getByText(dir, { exact: true }).waitFor();
+    const liveTranscript = await readTranscript();
+    assert.match(liveTranscript.content, /오래 걸리는 요청[\s\S]*사용자 지정 API · ui\/test-model · 응답 중/);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "＋ 새 대화", exact: true }).click();
     await page.getByRole("heading", { name: "새 대화", exact: true }).waitFor();
     const editTitle = page.getByRole("button", { name: "대화 이름 변경" });
     const titleBox = page.getByRole("textbox", { name: "대화 이름", exact: true });
     await editTitle.click();
-    await titleBox.fill("대조 초안");
+    await titleBox.fill("대조: 초안/검토?");
     await titleBox.press("Enter");
-    await page.getByRole("heading", { name: "대조 초안", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "대조: 초안/검토?", exact: true }).waitFor();
     await page.getByRole("textbox", { name: "메시지" }).fill("별도 세션");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("[mock] 수신한 메시지: 별도 세션", { exact: true }).waitFor();
@@ -401,24 +416,32 @@ test(
     const activeId = await page.evaluate(() => sessionStorage.getItem("ags-session"));
     const draftBox = page.getByRole("textbox", { name: "메시지", exact: true });
     await draftBox.fill("다시 돌아와서 쓸 초안");
+    await page.getByRole("button", {name:"설정", exact:true}).click();
+    await page.getByRole("button", {name:"고급 기능"}).click();
+    const separateTranscript = await readTranscript();
+    assert.equal(separateTranscript.name, "AGS-대조_ 초안_검토_.md");
+    assert.equal(separateTranscript.content,
+      "# 대조: 초안/검토?\n\n## 1. 사용자\n\n별도 세션\n\n### 답변 · 로컬 mock · 완료\n\n[mock] 수신한 메시지: 별도 세션\n");
+    await page.keyboard.press("Escape");
+    assert.equal(await draftBox.inputValue(), "다시 돌아와서 쓸 초안");
     const titleUrl = `${base}/api/sessions/${activeId}/title`;
     const titleHeaders = { authorization: `Bearer ${token}` };
     await editTitle.click();
     await titleBox.fill("취소할 이름");
     await titleBox.press("Escape");
-    await page.getByRole("heading", { name: "대조 초안", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "대조: 초안/검토?", exact: true }).waitFor();
     await editTitle.click();
     await titleBox.fill("사료 대조");
     const setTitle = (title, previous) => page.request.put(titleUrl, { headers: titleHeaders, data: {title, previous} });
     for (const invalid of [" ", "두\n줄", "가".repeat(81)])
-      assert.equal((await setTitle(invalid, "대조 초안")).status(), 400);
-    assert.ok((await setTitle("다른 창의 제목", "대조 초안")).ok());
+      assert.equal((await setTitle(invalid, "대조: 초안/검토?")).status(), 400);
+    assert.ok((await setTitle("다른 창의 제목", "대조: 초안/검토?")).ok());
     await titleBox.press("Enter");
     await page.getByRole("alert").filter({ hasText: "다른 창의 제목" }).waitFor();
     assert.equal(await titleBox.inputValue(), "사료 대조");
     await titleBox.press("Enter");
     await page.getByRole("heading", { name: "사료 대조", exact: true }).waitFor();
-    assert.ok((await setTitle("사료 대조", "대조 초안")).ok());
+    assert.ok((await setTitle("사료 대조", "대조: 초안/검토?")).ok());
     const navTitles = await sessionNav.getByRole("button").allTextContents();
     await sessionSearch.fill("사료 mock");
     await sessionNav.getByRole("button", { name: /사료 대조/ }).waitFor();
@@ -474,6 +497,14 @@ test(
     await page.getByText(original, { exact: true }).waitFor();
     await page.getByRole("button", { name: "치환 결과 보기" }).click();
     await page.getByText(displayed, { exact: true }).waitFor();
+    await page.getByRole("button", {name:"설정", exact:true}).click();
+    await page.getByRole("button", {name:"고급 기능"}).click();
+    const restoredTranscript = await readTranscript();
+    assert.ok(restoredTranscript.content.includes(original));
+    assert.ok(!restoredTranscript.content.includes(displayed));
+    assert.ok(restoredTranscript.content.indexOf(original) < restoredTranscript.content.indexOf("오래 걸리는 요청"));
+    assert.match(restoredTranscript.content, /사용자 지정 API · ui\/test-model · 중단됨\n\n독립 세션 응답/);
+    await page.keyboard.press("Escape");
     await stop();
     await start(new URL(base).port);
     await page.reload();
