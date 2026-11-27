@@ -85,6 +85,46 @@ function ReviewResult({
   );
 }
 
+function PastReview({ token, path, project, insert }: {
+  token: string;
+  path: string;
+  project: Project | undefined;
+  insert: (value: string) => void;
+}) {
+  const [request, setRequest] = useState(0);
+  const [result, setResult] = useState<Review>();
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!request) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    setError(false);
+    api(token, path, "GET", undefined, signal)
+      .then(response => response.json())
+      .then((review: Review) => {
+        if (!signal.aborted) setResult(review);
+      })
+      .catch(() => {
+        if (!signal.aborted) setError(true);
+      });
+    return () => controller.abort();
+  }, [token, path, request]);
+  return (
+    <details onToggle={event => {
+      if (event.currentTarget.open && !request) setRequest(1);
+    }}>
+      <summary>이전 검토 결과 사용</summary>
+      {result ? <ReviewResult token={token} review={result} project={project} insert={insert} />
+        : error ? (
+          <div role="alert">
+            검토 결과를 읽지 못했습니다.{" "}
+            <button type="button" onClick={() => setRequest(n => n + 1)}>다시 읽기</button>
+          </div>
+        ) : <small>검토 결과를 읽는 중…</small>}
+    </details>
+  );
+}
+
 function ReplyExcerpt({ turns, draft, references, insert }: {
   turns: Turn[];
   draft: string;
@@ -387,6 +427,9 @@ export function ReviewEditor({
                   {item.title.split("\n")[0]} · {providerNames[item.provider]} {item.model} ·{" "}
                   {states[item.status]} · 대화 열기
                 </button>
+                {item.status === "completed" && item.id !== review?.id && (
+                  <PastReview token={token} path={`${route}/${item.id}`} project={project} insert={insert} />
+                )}
               </li>
             ))}
           </ul>
