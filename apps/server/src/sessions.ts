@@ -48,6 +48,7 @@ function sessionFromRow(row: Record<string, unknown>): Session {
 
 export class SessionStore {
   private db: DatabaseSync;
+  private deleteConfirmations = new Map<string, { token: string; snapshot: string }>();
   protectCall?: (capture: CallCapture) => void;
 
   constructor(path: string) {
@@ -209,6 +210,7 @@ export class SessionStore {
     text: string,
     kind: FileReference["kind"] = "file",
   ) {
+    this.requireSession(session);
     if (kind === "knowledge" && !this.knowledgeEnabled()) throw new WorkspaceError(409, "knowledge_disabled");
     const prior = this.db
       .prepare(
@@ -533,6 +535,11 @@ export class SessionStore {
     const row = this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id);
     return row && sessionFromRow(row);
   }
+  requireSession(id: string) {
+    const session = this.get(id);
+    if (!session) throw new WorkspaceError(404, "unknown_session");
+    return session;
+  }
   changeSessionSection(id: string, sectionId: string | null, previous: string | null, revision: number) {
     if (sectionId !== null && !this.sectionExists(sectionId)) throw new WorkspaceError(400, "invalid_section");
     if (this.isStreaming(id)) throw new WorkspaceError(409, "session_busy");
@@ -547,6 +554,53 @@ export class SessionStore {
       ? "INSERT OR IGNORE INTO archived_sessions(session_id) VALUES (?)"
       : "DELETE FROM archived_sessions WHERE session_id=?";
     if (!this.db.prepare(sql).run(id).changes) throw new WorkspaceError(409, "archive_changed");
+    this.deleteConfirmations.delete(id);
+  }
+  private deletionState(id: string) {
+    const session = this.requireSession(id);
+    if (!session.archived) throw new WorkspaceError(409, "delete_requires_archive");
+    const activeReview = this.db.prepare(`SELECT 1 FROM reviews JOIN turns ON turns.id=reviews.id
+      WHERE requester=? AND status='streaming' LIMIT 1`).get(id);
+    if (this.isStreaming(id) || activeReview)
+      throw new WorkspaceError(409, "delete_busy");
+    const details = this.db.prepare(`SELECT
+      (SELECT COUNT(*) FROM turns WHERE session_id=?) AS turns,
+      (SELECT group_concat(id) FROM file_references WHERE session=?) AS attachments,
+      (SELECT group_concat(path) FROM checkpoints WHERE session=?) AS summaries,
+      (SELECT count(*) FROM checkpoints WHERE session=? AND saved=1) AS savedSummaries,
+      (SELECT group_concat(id) FROM reviews WHERE requester=?) AS reviews`).get(id, id, id, id, id);
+    return {
+      title: session.title, turns: Number(details?.turns), savedSummaries: Number(details?.savedSummaries),
+      snapshot: JSON.stringify([session, details, this.sources(id).revision, this.limits(id)]),
+    };
+  }
+  prepareDeletion(id: string) {
+    const { title, turns, savedSummaries, snapshot } = this.deletionState(id);
+    const token = randomUUID();
+    this.deleteConfirmations.set(id, { token, snapshot });
+    return { title, turns, savedSummaries, confirmation: token };
+  }
+  deleteArchivedSession(id: string, token: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const { snapshot } = this.deletionState(id);
+      const pending = this.deleteConfirmations.get(id);
+      if (!pending || pending.token !== token || pending.snapshot !== snapshot)
+        throw new WorkspaceError(409, "delete_changed");
+      this.db.prepare("DELETE FROM reviews WHERE requester=? OR id IN (SELECT id FROM turns WHERE session_id=?)").run(id, id);
+      this.db.prepare("DELETE FROM checkpoints WHERE session=?").run(id);
+      this.db.prepare("DELETE FROM file_references WHERE session=?").run(id);
+      this.db.prepare("DELETE FROM call_log WHERE json_extract(summary,'$.session')=?").run(id);
+      for (const table of ["context_limits", "session_sources", "archived_sessions", "turns"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id);
+      }
+      this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
+      this.db.exec("COMMIT");
+      this.deleteConfirmations.delete(id);
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   turns(id: string) {
     return this.db

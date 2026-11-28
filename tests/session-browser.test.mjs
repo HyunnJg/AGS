@@ -1686,3 +1686,43 @@ test("대화 목록에서 프로젝트 섹션·미소속·검색어·보관함�
   assert.equal(await nav.getByRole("button").count(), 4);
   assert.deepEqual(pageErrors, []);
 });
+
+test("보관한 대화를 확인 후 삭제하면 두 탭의 초안과 재시작 후 목록에서도 사라진다", { timeout: 60_000 }, async t => {
+  const { page, context, token, base, start, stop, pageErrors } = await openBrowserWorkspace(t);
+  await page.getByRole("button", { name: "첫 대화 시작" }).click();
+  const composer = page.getByRole("textbox", { name: "메시지", exact: true });
+  await composer.fill("삭제 연습");
+  await page.getByRole("button", { name: "전송" }).click();
+  await page.getByText("[mock] 수신한 메시지: 삭제 연습", { exact: true }).waitFor();
+  const id = await page.evaluate(() => sessionStorage.getItem("ags-session"));
+  const path = `${base}/api/sessions/${id}`;
+  const headers = { authorization: `Bearer ${token}` };
+  assert.equal((await page.request.post(`${path}/delete-preview`, { headers })).status(), 409);
+  const other = await context.newPage();
+  await other.goto(base);
+  await other.getByLabel("로컬 인증 토큰").fill(token);
+  await other.getByRole("button", { name: "작업실 열기" }).click();
+  await other.getByRole("textbox", { name: "메시지", exact: true }).fill("다른 탭 초안");
+  await composer.fill("삭제할 초안");
+  await page.getByRole("button", { name: "대화 보관", exact: true }).click();
+  await page.getByRole("button", { name: "보관함 보기" }).click();
+  const remove = page.getByRole("button", { name: "대화 영구 삭제", exact: true });
+  await remove.click();
+  await page.getByText(/‘삭제 연습’의 1개 턴/).waitFor();
+  await page.getByRole("button", { name: "삭제 취소" }).click();
+  assert.equal(await composer.inputValue(), "삭제할 초안");
+  assert.equal((await page.request.delete(path, { headers, data: {confirmation: "outdated"} })).status(), 409);
+  await remove.click();
+  await page.getByRole("button", { name: "영구 삭제 확인" }).click();
+  for (const tab of [page, other]) {
+    await tab.getByRole("button", { name: "첫 대화 시작" }).waitFor();
+    assert.equal(await tab.evaluate(id => sessionStorage.getItem(`ags-draft:${id}`), id), null);
+  }
+  assert.equal((await page.request.get(path, { headers })).status(), 404);
+  await stop();
+  await start(new URL(base).port);
+  await page.reload();
+  await page.getByRole("button", { name: "첫 대화 시작" }).waitFor();
+  assert.deepEqual(await (await page.request.get(`${base}/api/sessions`, { headers })).json(), []);
+  assert.deepEqual(pageErrors, []);
+});

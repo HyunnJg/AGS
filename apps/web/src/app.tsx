@@ -1,3 +1,4 @@
+import { DeleteConversation } from "./DeleteConversation.tsx";
 import { ConversationSearch } from "./ConversationSearch.tsx";
 import { ConversationTitle } from "./ConversationTitle.tsx";
 import { ReviewEditor } from "./ReviewEditor.tsx";
@@ -91,6 +92,7 @@ function Conversation({
   options,
   onRemoteActivity,
   onReviewer,
+  onDeleted,
   text,
   setText,
   draftUnsaved,
@@ -106,6 +108,7 @@ function Conversation({
   customPresets: CustomPresetSummary[];
   displayRules: DisplayRule[];
   options: ProviderOption[];
+  onDeleted: (id: string) => void;
   onReviewer: (id: string, open?: boolean) => void;
   onRemoteActivity: (id: string, active: boolean) => void;
   text: string;
@@ -321,6 +324,9 @@ function Conversation({
           <button type="button" disabled={savingArchive || busy || remoteStreaming || !ready} onClick={() => void changeArchive()}>
             {session.archived ? "보관함에서 복원" : "대화 보관"}
           </button>
+          {session.archived && <DeleteConversation token={token} id={session.id} onDeleted={onDeleted}
+            onRestored={() => update({ id: session.id, archived: false })}
+            disabled={savingArchive || busy || remoteStreaming || !ready} />}
         </div>
         <label className="preset">
           프리셋{" "}
@@ -453,6 +459,10 @@ type ChatDraft = { text: string; unsaved: boolean };
 function restoreDrafts(sessions: Session[]) {
   const drafts: Record<string, ChatDraft> = {};
   try {
+    const ids = new Set(sessions.map(s => s.id));
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith("ags-draft:") && !ids.has(key.slice("ags-draft:".length))) sessionStorage.removeItem(key);
+    }
     for (const { id } of sessions) {
       const text = sessionStorage.getItem(`ags-draft:${id}`);
       if (text) drafts[id] = { text, unsaved: false };
@@ -586,6 +596,36 @@ function Workspace({ token }: { token: string }) {
       alive = false;
     };
   }, [token, select]);
+  const deletedChannel = useRef<BroadcastChannel | null>(null);
+  const forgetSession = useCallback((deleted: string) => {
+    try { sessionStorage.removeItem(`ags-draft:${deleted}`); } catch { /* Storage may be unavailable. */ }
+    setSessions(prev => prev.filter(s => s.id !== deleted));
+    setDrafts(prev => {
+      const next = { ...prev };
+      delete next[deleted];
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("ags-deleted-sessions") : null;
+    deletedChannel.current = channel;
+    if (channel) channel.onmessage = event => {
+      if (typeof event.data === "string") forgetSession(event.data);
+    };
+    const missing = (event: Event) => forgetSession((event as CustomEvent<string>).detail);
+    window.addEventListener("ags-session-missing", missing);
+    return () => {
+      window.removeEventListener("ags-session-missing", missing);
+      deletedChannel.current = null;
+      channel?.close();
+    };
+  }, [forgetSession]);
+  useEffect(() => {
+    if (!sessionsReady || !id || sessions.some(s => s.id === id)) return;
+    const next = sessions.find(s => Boolean(s.archived) === showArchived) ?? sessions[0];
+    setShowArchived(Boolean(next?.archived));
+    select(next?.id ?? "");
+  }, [sessionsReady, id, sessions, showArchived, select]);
   async function create() {
     setLocked(true);
     try {
@@ -737,6 +777,10 @@ function Workspace({ token }: { token: string }) {
             text={drafts[current.id]?.text ?? ""}
             draftUnsaved={drafts[current.id]?.unsaved ?? false}
             setText={value => saveDraft(current.id, value)}
+            onDeleted={deleted => {
+              forgetSession(deleted);
+              deletedChannel.current?.postMessage(deleted);
+            }}
             onReviewer={async (reviewer, open) => {
               try {
                 const data = await (await api(token,`/api/sessions/${reviewer}`)).json();
