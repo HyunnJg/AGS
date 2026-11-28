@@ -77,5 +77,6 @@ export async function openBrowserWorkspace(t, providerPort) {
   await page.goto(base);
   await page.getByLabel("로컬 인증 토큰").fill(token);
   await page.getByRole("button", { name: "작업실 열기" }).click();
+  await page.getByRole("button", { name: "첫 대화 시작" }).waitFor();
   return { dir, token, start, stop, base, context, page, pageErrors };
 }

@@ -15,6 +15,9 @@ export class SettingsConflict extends Error {
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 const workspaceMessages: Record<string, string> = {
+  workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 파일 변경 여부와 줄 길이를 확인하세요.",
+  workspace_read_unavailable: "현재 mock 대화와 연결 폴더를 확인한 뒤 읽기를 다시 허용하세요.",
+  invalid_tool_query: "찾을 문구를 큰따옴표 안에 1~120자로 입력하세요.",
   source_unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
   knowledge_disabled: "설정 → 토글형 모듈에서 외부 지식 참조를 켜면 지식 발췌를 추가할 수 있습니다.",
   reference_kind_conflict: "이 범위는 이미 다른 방식으로 첨부했습니다. 첨부 자료에서 뺀 뒤 다시 선택하세요.",
@@ -124,6 +127,10 @@ export async function api(
         workspaceMessages[body.error] ?? `작업공간 요청을 완료하지 못했습니다 (HTTP ${res.status}).`,
       );
     }
+    if (path.endsWith("/chat") && res.status === 400) {
+      const { error } = await res.json();
+      throw new Error(workspaceMessages[error] ?? "보낼 메시지를 확인하세요.");
+    }
     if (path.endsWith("/archive") && res.status === 409) {
       const body = await res.json();
       throw new Error(body.error === "archive_streaming" ? "응답이 끝난 뒤 보관 상태를 변경하세요." : "다른 창에서 대화 보관 상태를 변경했습니다.");
@@ -157,6 +164,7 @@ export async function api(
     if (path.endsWith("/section") && res.status === 400) throw new Error("연결할 섹션을 다시 선택하세요.");
     if (res.status === 409) {
       const body = await res.json().catch(() => ({}));
+      if (body.error === "workspace_read_unavailable") throw new Error(workspaceMessages.workspace_read_unavailable);
       if (body.error === "checkpoint_busy") throw new Error(workspaceMessages.checkpoint_busy);
       if (body.error === "session_section_changed") throw new Error("대화 소속이 이미 변경됐습니다. 현재 섹션을 확인하세요.");
       throw new Error("이 대화에서 응답이 진행 중입니다.");

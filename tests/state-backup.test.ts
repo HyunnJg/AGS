@@ -39,6 +39,8 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
   assert.ok(db.rename(empty.id, empty.title, "새 대화"));
   db.setSessionArchived(empty.id, true);
   db.begin(session, "turn-1", "지난 작업");
+  const sourceRead = { tool: "read_file", path: "전시.md", version: "fixture-version", start: 2, end: 2 } as const;
+  db.recordToolRead("turn-1", project, 1, sourceRead);
   db.append("turn-1", "초안 내용");
   db.reserveCheckpoint(session.id, "turn-1", "turn-1", "saved.md", "fixture-version");
   db.finishCheckpoint("saved.md", true);
@@ -93,6 +95,7 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
       [{ provider: "openai", model: "fixture-model" }],
     );
     assert.equal(reopened.turns(session.id)[0]?.reply, "초안 내용");
+    assert.deepEqual(reopened.turns(session.id)[0]?.workspaceReads, [sourceRead]);
     assert.equal(reopened.turns(session.id)[0]?.status, "interrupted");
     reopened.changeSessionSection(session.id, null, sectionId, 0);
   } finally {
@@ -131,7 +134,8 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
   assert.ok(payload.includes(archiveRows));
   // Before v11 these two tables each had one fewer column, including their data rows.
   let trimLast = false;
-  const preSections = payload.split("\n").map(line => {
+  const preReads = payload.replace(/^\["table","turn_workspace_reads",.*\n(?:\["row",.*\n)*/m, "");
+  const preSections = preReads.split("\n").map(line => {
     if (!line) return line;
     const row = JSON.parse(line);
     if (row[0] === "table") {
@@ -150,7 +154,7 @@ test("백업은 키와 쓰기 권한을 분리하고 새 폴더에 대화·설�
     .replace('["table","shared_prompt",["id","prompt","responseLanguage"]]\n["row",1,1,"","en"]',
       '["table","shared_prompt",["id","prompt"]]\n["row",1,1,"기존 공용 지침"]');
   const v6 = prePresets.replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,6]');
-  for (const [version, contents] of [[5, v5], [6, v6], [7, v7], [8, v8], [9, v9], [10, v10]] as const) {
+  for (const [version, contents] of [[5, v5], [6, v6], [7, v7], [8, v8], [9, v9], [10, v10], [11, preReads.replace(`["AGS-private-state",1,${sessionSchemaVersion}]`, '["AGS-private-state",1,11]')]] as const) {
     const legacyFile = join(dir, `v${version}.ags-backup`), legacyDir = join(dir, `v${version}-restored`);
     const digest = createHash("sha256").update(contents).digest("hex");
     writeFileSync(legacyFile, `${contents}${JSON.stringify(["sha256", digest])}\n`);

@@ -4,6 +4,7 @@ import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
+import { workspaceScope, mockWorkspaceReply, searchPhrase } from "./workspace-tools.ts";
 import { workspaceApi } from "./workspace-api.ts";
 import { checkKnowledgeSource } from "./knowledge-source.ts";
 import { WorkspaceError } from "./workspace-files.ts";
@@ -440,11 +441,17 @@ export function createChatServer(
       return json(store.references(sessionId));
     }
     const route =
-      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/delete-preview|\/checkpoint|\/sources|\/title|\/archive|\/section)?$/.exec(
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/workspace-read|\/chat|\/context|\/context-preview|\/delete-preview|\/checkpoint|\/sources|\/title|\/archive|\/section)?$/.exec(
         path,
       );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/workspace-read") {
+      if (req.method !== "GET") return allow("GET");
+      const grant = workspaceScope(store, session);
+      if (!grant) throw new RequestError(409, "workspace_read_unavailable");
+      return json({ scope: grant.scope, folder: grant.root.path });
+    }
     if (session && store && route?.[2] === "/delete-preview") {
       if (req.method !== "POST") return allow("POST");
       if (checkpoints.isBusy(session.id)) throw new RequestError(409, "delete_busy");
@@ -621,6 +628,10 @@ export function createChatServer(
     if (session?.sectionRevision !== revisionAtAdmission) throw new RequestError(409, "session_section_changed");
     const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
+    const scope = body.workspaceScope && store && session ? workspaceScope(store, session) : undefined;
+    if (body.workspaceScope && (!scope || scope.scope !== body.workspaceScope))
+      throw new RequestError(409, "workspace_read_unavailable");
+    const query = scope && searchPhrase(message);
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
     const controller = new AbortController();
@@ -674,8 +685,23 @@ export function createChatServer(
         ...(context?.stateStale && { "x-ags-section-state": "stale" }),
       });
       res.flushHeaders();
-      const reply =
-        session && session.provider !== "mock" && context
+      let sequence = 0;
+      const reply = scope && query && store && session
+        ? mockWorkspaceReply(scope.root, query, () => {
+            signal.throwIfAborted();
+            const current = store.project(scope.project);
+            if (current?.root !== scope.root.path || current.identity !== scope.root.identity)
+              throw new WorkspaceError(409, "folder_changed");
+          }, read => {
+            try {
+              store.recordToolRead(id, scope.project, ++sequence, read);
+            } catch (error) {
+              storageFailed = true;
+              throw error;
+            }
+            capture?.workspaceRead(read);
+          })
+        : session && session.provider !== "mock" && context
           ? providers.stream(
               session,
               context.messages,
@@ -727,6 +753,7 @@ export function createChatServer(
                 code:
                   signal.reason === "timeout"
                     ? "timeout"
+                    : scope ? "workspace_read_failed"
                     : error instanceof ProviderError
                       ? error.code
                       : "provider_failed",

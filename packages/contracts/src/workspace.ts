@@ -42,7 +42,12 @@ export interface WorkspaceSearch {
   limited: boolean;
 }
 
-export type FileAction = "entries" | "file" | "search" | "attach" | "write" | "create" | "verify";
+export type WorkspaceRead = (
+  | { tool: "search_workspace"; path: ""; query: string; matched?: boolean; limited?: boolean }
+  | { tool: "read_file"; path: string; version: string; start: number; end: number }
+) & { failed?: boolean };
+
+export type FileAction = "tool_search" | "tool_read" | "entries" | "file" | "search" | "attach" | "write" | "create" | "verify";
 export interface FileActivity {
   backup: string|null;
   id: number;
