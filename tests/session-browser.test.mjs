@@ -992,9 +992,11 @@ test(
     assert.equal((await page.request.patch(freshPath, {headers, data:{provider:"custom",model:"ui/test-model"}})).status(),200);
     assert.equal((await page.request.post(`${freshPath}/chat`,{headers,data:{message:"섹션 복원 검증"}})).status(),200);
     assert.deepEqual(statePayload, restored.messages);
-    const generated=await page.request.post(`${freshPath}/checkpoint`,{headers,data:{action:"draft",provider:"custom",model:"ui/test-model"}});
+    assert.ok((await page.request.patch(freshPath, { headers, data: { provider: "custom", model: "ui/other-model" } })).ok());
+    const generated=await page.request.post(`${freshPath}/checkpoint`,{headers,data:{action:"draft",provider:"custom",model:"ui/other-model"}});
     assert.equal(generated.status(),200);
     assert.match((await generated.json()).summary,/현장 검수/);
+    assert.ok((await page.request.patch(freshPath, { headers, data: { provider: "custom", model: "ui/test-model" } })).ok());
     await page.getByRole("button", {name:"설정", exact:true}).click();
     await page.getByRole("button", {name:"토글형 모듈"}).click();
     const collab = page.getByLabel("AI 협업 허용");
@@ -1142,6 +1144,7 @@ test(
     const logPicker = page.getByLabel("호출 선택");
     const filters = page.getByRole("group", { name: "호출 필터" });
     const providerFilter = filters.getByLabel("공급자", { exact: true });
+    const modelFilter = filters.getByLabel("모델 ID", { exact: true });
     const kindFilter = filters.getByLabel("호출 종류");
     const statusFilter = filters.getByLabel("종료 상태");
     const sessionFilter = filters.getByLabel("대화", {exact:true});
@@ -1158,6 +1161,19 @@ test(
     assert.ok(scoped.some(row => row.kind === "review") && scoped.some(row => row.kind === "checkpoint"));
     assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), scoped.map(row => row.id));
 
+    await providerFilter.selectOption("custom");
+    await modelFilter.selectOption("ui/other-model");
+    const modelCalls = scoped.filter(row => row.provider === "custom" && row.model === "ui/other-model");
+    assert.ok(modelCalls.length > 0 && scoped.some(row => row.provider === "custom" && row.model === "ui/test-model"));
+    assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), modelCalls.map(row => row.id));
+    const modelFile = page.waitForEvent("download");
+    await page.getByRole("button", { name: "필터 결과 JSON 다운로드" }).click();
+    const modelData = JSON.parse(await readFile(await (await modelFile).path(), "utf8"));
+    assert.deepEqual(modelData.map(row => row.id), modelCalls.map(row => row.id));
+    await page.getByText("필터 결과 토큰 사용량", { exact: true }).click();
+    await page.getByText(`모델 API 호출 ${modelCalls.length}건 중 0건에서 사용량을 보고했습니다.`, { exact: true }).waitFor();
+    await page.getByText("필터 결과 토큰 사용량", { exact: true }).click();
+
     const sessionNames = await (await page.request.get(`${base}/api/sessions`, { headers })).json();
     const sameTitle = "같은 작업명".repeat(12);
     for (const key of [sessionId, freshId]) {
@@ -1170,12 +1186,14 @@ test(
     for (const key of [sessionId, freshId])
       await sessionFilter.getByRole("option", {name: new RegExp(`${sameTitle}.*${key}`)}).waitFor({state:"attached"});
     assert.equal(await sessionFilter.inputValue(), freshId);
+    assert.equal(await modelFilter.inputValue(), "ui/other-model");
     assert.ok(await page.locator("dialog").evaluate(el => el.scrollWidth <= el.clientWidth));
     await sessionFilter.selectOption(sample.session);
+    await modelFilter.selectOption(sample.model);
     await providerFilter.selectOption("custom");
     await kindFilter.selectOption("chat");
     await statusFilter.selectOption("completed");
-    const matching = list.filter((row) => row.session === sample.session && row.provider === "custom" && row.kind === "chat" && row.status === "completed");
+    const matching = list.filter((row) => row.session === sample.session && row.provider === "custom" && row.model === sample.model && row.kind === "chat" && row.status === "completed");
     assert.ok(matching.length > 0 && matching.length < list.length);
     assert.deepEqual(await logPicker.locator("option").evaluateAll(options => options.map(o => o.value)), matching.map(r => r.id));
     await page.getByText(`${list.length}건 중 ${matching.length}건`, { exact: true }).waitFor();
@@ -1236,6 +1254,8 @@ test(
       assert.ok(!JSON.stringify(data).includes("fixture-only"));
     }
     await providerFilter.selectOption("mock");
+    assert.equal(await modelFilter.inputValue(), "");
+    assert.equal(await modelFilter.locator("option").count(), 1);
     await page.getByText("이 조건에 해당하는 모델 API 호출이 없습니다.").waitFor();
     assert.equal(await totalsTable.count(), 0);
     await statusFilter.selectOption("timeout");

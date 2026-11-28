@@ -162,7 +162,7 @@ function UsageTotals({ rows }: { rows: CallSummary[] }) {
 
 const usageListPath = "/api/call-logs?usage=1";
 const noSession = "unassigned";
-const emptyFilters = { session: "", provider: "", kind: "", status: "" };
+const emptyFilters = { session: "", provider: "", model: "", kind: "", status: "" };
 
 export function CallLogs({ token, currentSession }: { token: string; currentSession?: Session }) {
   const [rows, setRows] = useState<CallSummary[]>();
@@ -190,9 +190,17 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
     if ((labelCounts.get(sessionOptions[id]) ?? 0) > 1 && id !== noSession) sessionOptions[id] += ` · ${id}`;
     if (id === currentSession?.id) sessionOptions[id] = `현재 대화 · ${sessionOptions[id]}`;
   }
+  const modelIds = new Set<string>();
+  for (const row of rows ?? []) {
+    if (row.model && (!filters.provider || row.provider === filters.provider)) modelIds.add(row.model);
+  }
+  // Keep the selected ID visible if its last retained call is evicted on refresh.
+  if (filters.model) modelIds.add(filters.model);
+  const modelOptions = Object.fromEntries([...modelIds].sort().map(model => [model, model]));
   const visibleRows = rows?.filter((row) =>
     (!filters.session || (row.session ?? noSession) === filters.session) &&
     (!filters.provider || row.provider === filters.provider) &&
+    (!filters.model || row.model === filters.model) &&
     (!filters.kind || row.kind === filters.kind) &&
     (!filters.status || row.status === filters.status)
   ) ?? [];
@@ -200,7 +208,13 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
   const selectedId = selected?.id;
   function changeFilter(key: keyof typeof filters, value: string) {
     setId(selectedId ?? "");
-    setFilters((current) => ({ ...current, [key]: value }));
+    setFilters(current => {
+      if (key === "provider" && value && current.model &&
+          !rows?.some(row => row.provider === value && row.model === current.model)) {
+        return { ...current, provider: value, model: "" };
+      }
+      return { ...current, [key]: value };
+    });
   }
   const [error, setError] = useState("");
   const [query, refresh] = useState({ path: usageListPath });
@@ -307,6 +321,7 @@ export function CallLogs({ token, currentSession }: { token: string; currentSess
           <fieldset className="call-log-filters" aria-label="호출 필터">
             <LogFilter label="대화" options={sessionOptions} value={filters.session} change={v => changeFilter("session", v)} />
             <LogFilter label="공급자" options={providerNames} value={filters.provider} change={(v) => changeFilter("provider", v)} />
+            <LogFilter label="모델 ID" options={modelOptions} value={filters.model} change={v => changeFilter("model", v)} />
             <LogFilter label="호출 종류" options={callKinds} value={filters.kind} change={(v) => changeFilter("kind", v)} />
             <LogFilter label="종료 상태" options={statuses} value={filters.status} change={(v) => changeFilter("status", v)} />
           </fieldset>
