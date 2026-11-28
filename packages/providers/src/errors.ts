@@ -1,13 +1,21 @@
 import type { ProviderId } from "../../contracts/src/providers.ts";
 import { type CallCapture, readErrorBody } from "./capture.ts";
-import { invalidGeminiKey } from "./gemini.ts";
 
-type UpstreamCode = "provider_auth" | "provider_limit" | "provider_failed";
+type UpstreamCode = "provider_auth" | "provider_limit" | "provider_failed" | "provider_output_budget";
 export class ProviderError extends Error {
   readonly code: UpstreamCode;
   constructor(code: UpstreamCode) {
     super(code);
     this.code = code;
+  }
+}
+
+function invalidGeminiKey(body: string) {
+  try {
+    const details = JSON.parse(body).error?.details;
+    return Array.isArray(details) && details.some((item) => item?.reason === "API_KEY_INVALID");
+  } catch {
+    return false;
   }
 }
 

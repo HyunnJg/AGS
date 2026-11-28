@@ -386,7 +386,7 @@ export function ReviewEditor({
           <small>자료를 빼거나 요청을 줄여 8,000자 이내로 맞춰 주세요.</small>
         )}
         <small>
-          작성한 요청과 선택한 발췌만 독립 대화에 한 번 보냅니다. 최대 출력 {reviewOutputTokens}토큰
+          작성한 요청과 선택한 발췌만 독립 대화에 한 번 보냅니다. 최대 출력 {reviewOutputTokens.toLocaleString("ko-KR")}토큰 (사고 토큰 포함)
           {selection !== JSON.stringify(["mock", ""]) ? " · API 사용료가 발생할 수 있습니다." : ""}
         </small>
         <button

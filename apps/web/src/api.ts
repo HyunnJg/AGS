@@ -14,6 +14,8 @@ export class SettingsConflict extends Error {
 }
 import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
+export const outputBudgetMessage = "표시할 답변을 받기 전에 출력 예산을 모두 사용했습니다. 사고 토큰도 한도에 포함됩니다.";
+
 const workspaceMessages: Record<string, string> = {
   workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 파일 변경 여부와 줄 길이를 확인하세요.",
   workspace_read_unavailable: "현재 대화 모델과 연결 폴더를 확인한 뒤 읽기를 다시 허용하세요.",
@@ -43,6 +45,7 @@ const workspaceMessages: Record<string, string> = {
   checkpoint_timeout: "요약 요청이 중단됐습니다. 다시 시도할 수 있습니다.",
   checkpoint_budget: "요약할 대화가 입력 예산을 넘습니다. 컨텍스트 제어에서 입력 예산 또는 모델을 확인하세요.",
   checkpoint_empty: "모델이 빈 요약을 반환했습니다. 다시 시도하세요.",
+  provider_output_budget: outputBudgetMessage,
   provider_limit: "공급자 요청 한도에 도달했습니다.",
   provider_auth: "공급자 키와 접근 권한을 확인하세요.",
   provider_failed: "공급자가 요청을 완료하지 못했습니다. 모델 설정을 확인하세요.",

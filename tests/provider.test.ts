@@ -52,6 +52,10 @@ test(
           return;
         }
         res.writeHead(200, { "content-type": "text/event-stream" });
+        if (mode === "output-limit") {
+          res.end('data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: {"choices":[],"usage":{"completion_tokens":4096}}\n\ndata: [DONE]\n\n');
+          return;
+        }
         if (mode === "burst") {
           res.write('data: {"choices":[{"delta":{"content":"가"}}]}\n\n'.repeat(200));
           res.write(`: ${"x".repeat(65536)}\n\n`);
@@ -291,6 +295,7 @@ test(
       ["network", "provider_failed"],
       ["truncated", "provider_failed"],
       ["stream-error", "provider_failed"],
+      ["output-limit", "provider_output_budget"],
     ]) {
       mode = failure ?? "";
       const wire = await (await send("failure")).text();

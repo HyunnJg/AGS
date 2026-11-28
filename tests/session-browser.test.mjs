@@ -13,6 +13,7 @@ test(
   async (t) => {
     let statePayload;
     const failedQuestion = "응답 실패 후 고쳐 쓸 질문";
+    const exhaustedReview = "출력 예산 소진 확인";
     const longReply = `공유할 문단\n${"검토에 보내지 않을 내용\n".repeat(700)}직접 연결 응답`;
     const fake = createServer(async (req, res) => {
       if (req.url?.startsWith("/anthropic/")) {
@@ -35,7 +36,7 @@ test(
         const review = body.system[0].text.startsWith("독립 검토자");
         if (review) {
           assert.deepEqual(body.messages, [{role:"user",content:"Claude 독립 검토 확인"}]);
-          assert.equal(body.max_tokens, 1200);
+          assert.equal(body.max_tokens, 4096);
         }
         const events = [{type:"message_start"}, {type:"content_block_start",index:0,content_block:{type:"text",text:""}},
           {type:"content_block_delta",index:0,delta:{type:"text_delta",text:review ? "Claude 검토 완료" : "Claude 채팅 응답"}},
@@ -57,8 +58,13 @@ test(
         const request = JSON.parse(Buffer.concat(chunks).toString());
         const review = request.systemInstruction.parts[0].text.startsWith("독립 검토자");
         if (review) {
+          assert.equal(request.generationConfig.maxOutputTokens, 4096);
+          if (request.contents[0].parts[0].text === exhaustedReview) {
+            const frame = { candidates: [{ finishReason: "MAX_TOKENS" }], usageMetadata: { thoughtsTokenCount: 4096 } };
+            res.writeHead(200, {"content-type":"text/event-stream"}).end(`data: ${JSON.stringify(frame)}\n\n`);
+            return;
+          }
           assert.deepEqual(request.contents, [{role:"user", parts:[{text:"선택한 문단 검토\n\n공유할 문단"}]}]);
-          assert.equal(request.generationConfig.maxOutputTokens, 1200);
         }
         const text = review ? "선택 문단 검토 완료" : "Gemini 대화 응답";
         const frame = { candidates:[{content:{role:"model", parts:[{text}]}, finishReason:"STOP"}],usageMetadata:{totalTokenCount:29} };
@@ -82,7 +88,7 @@ test(
         assert.ok(!("max_tokens" in payload));
         if (payload.messages[0].content.startsWith("독립 검토자")) {
           assert.match(payload.messages[0].content, /한국어로 답하세요/);
-          assert.equal(payload.max_completion_tokens, 1200);
+          assert.equal(payload.max_completion_tokens, 4096);
           assert.deepEqual(payload.messages.slice(1), [{ role: "user", content: "직접 연결 검토 확인" }]);
         }
         res.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "openai-local-1" });
@@ -1355,7 +1361,7 @@ test(
     }
     const reviewLog = directLogs.find(row => row.kind === "review" && row.provider === "openai");
     assert.deepEqual(reviewLog.usage, {totalTokens: 24});
-    assert.equal(reviewLog.request.maxTokens, 1200);
+    assert.equal(reviewLog.request.maxTokens, 4096);
     assert.equal(reviewLog.headers["x-request-id"], "openai-local-1");
     assert.ok(reviewLog.body.includes("[DONE]"));
     assert.ok(reviewLog.body.includes('"total_tokens":24'));
@@ -1376,6 +1382,10 @@ test(
     await page.getByText("Gemini 대화 응답", {exact:true}).waitFor();
     await switchModel("openai", "ui/openai-text");
     await editor.getByRole("combobox").selectOption(JSON.stringify(["gemini", "gemini-fixture"]));
+    await editor.getByText(/최대 출력 4,096토큰/).waitFor();
+    await reviewDraft.fill(exhaustedReview);
+    await editor.getByRole("button", {name:"승인하고 검토 요청"}).click();
+    await editor.getByRole("alert").filter({hasText:"출력 예산을 모두 사용했습니다"}).waitFor();
     await reviewDraft.fill("선택한 문단 검토");
     await editor.getByText("대화 답변에서 발췌", { exact: true }).click();
     const source = editor.getByLabel("발췌할 답변");
@@ -1402,17 +1412,21 @@ test(
     const independent = await (await approved).json();
     assert.equal(independent.provider, "gemini");
     assert.equal(independent.reply, "선택 문단 검토 완료");
-    await editor.getByText("검토 이력 2건", {exact:true}).click();
+    await editor.getByText("검토 이력 3건", {exact:true}).click();
     await editor.getByRole("button", {name:/선택한 문단 검토.*대화 열기/}).click();
     await page.waitForFunction(id => sessionStorage.getItem("ags-session") === id, independent.reviewer);
     await page.getByText("선택 문단 검토 완료", {exact:true}).waitFor();
     const nativeLogs = await (await page.request.get(`${base}/api/call-logs/export`, {headers})).json();
     for (const kind of ["catalog", "chat", "review"])
       assert.ok(nativeLogs.some(row => row.provider === "gemini" && row.kind === kind && row.status === "completed"));
-    const nativeReview = nativeLogs.find(row => row.provider === "gemini" && row.kind === "review");
+    const geminiReviews = nativeLogs.filter(row => row.provider === "gemini" && row.kind === "review");
+    assert.equal(geminiReviews.length, 2);
+    const exhaustedLog = geminiReviews.find(row => row.status === "failed");
+    assert.equal(exhaustedLog.usage.reasoningTokens, 4096);
+    const nativeReview = geminiReviews.find(row => row.status === "completed");
     assert.deepEqual(nativeReview.usage, {totalTokens: 29});
     assert.equal(nativeReview.answer, independent.reply);
-    assert.equal(nativeReview.request.maxTokens, 1200);
+    assert.equal(nativeReview.request.maxTokens, 4096);
     assert.match(nativeReview.body, /usageMetadata/);
     assert.ok(!JSON.stringify(nativeLogs).includes("gemini-ui-fixture"));
     await page.getByRole("button", {name:"설정",exact:true}).click();
@@ -1446,7 +1460,7 @@ test(
     const logged = claudeLogs.find(row => row.provider === "anthropic" && row.kind === "review");
     assert.deepEqual(logged.usage, {outputTokens: 7});
     assert.equal(logged.answer, claudeReview.reply);
-    assert.equal(logged.request.maxTokens,1200);
+    assert.equal(logged.request.maxTokens,4096);
     assert.match(logged.body,/output_tokens/);
     assert.ok(!JSON.stringify(claudeLogs).includes("anthropic-ui-fixture"));
     await composer.fill(failedQuestion);

@@ -75,16 +75,24 @@ async function* eventData(body: ReadableStream<Uint8Array>, onActivity?: () => v
 }
 
 async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture) {
+  let hasText = false;
+  let reachedLimit = false;
   for await (const data of events) {
-    if (data.trim() === "[DONE]") return;
+    if (data.trim() === "[DONE]") {
+      if (reachedLimit && !hasText) throw new ProviderError("provider_output_budget");
+      return;
+    }
     const chunk = JSON.parse(data);
     capture?.recordCompatibleUsage(chunk.usage);
     const choice = chunk.choices?.[0];
     if (chunk.error || choice?.finish_reason === "error") throw new ProviderError("provider_failed");
-    const content = choice?.delta?.content;
-    if (typeof content === "string" && content) yield content;
-    const refusal = choice?.delta?.refusal;
-    if (typeof refusal === "string" && refusal) yield refusal;
+    if (choice?.finish_reason === "length") reachedLimit = true;
+    for (const part of [choice?.delta?.content, choice?.delta?.refusal]) {
+      if (typeof part === "string" && part) {
+        if (part.trim()) hasText = true;
+        yield part;
+      }
+    }
   }
   throw new ProviderError("provider_failed");
 }

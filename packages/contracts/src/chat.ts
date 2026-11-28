@@ -20,7 +20,7 @@ export function isChatRequest(value: unknown): value is ChatRequest {
 export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "done" }
-  | { type: "error"; code: "workspace_tool_budget" | "workspace_read_failed" | "provider_failed" | "provider_auth" | "provider_limit" | "storage_failed" | "timeout" }
+  | { type: "error"; code: "workspace_tool_budget" | "workspace_read_failed" | "provider_failed" | "provider_auth" | "provider_output_budget" | "provider_limit" | "storage_failed" | "timeout" }
   | { type: "cancelled" };
 
 export function encodeEvent(event: ChatEvent): string {

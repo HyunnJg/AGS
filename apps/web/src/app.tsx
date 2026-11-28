@@ -13,7 +13,7 @@ import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { turnStatusLabels, presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn, type TurnSearchHit } from "../../../packages/contracts/src/sessions.ts";
-import { api, chatEvents } from "./api.ts";
+import { api, chatEvents, outputBudgetMessage } from "./api.ts";
 import {
   isModelSelection,
   providerNames,
@@ -287,6 +287,7 @@ function Conversation({
             workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 작업 활동과 원본 파일을 확인하세요.",
             storage_failed: "대화 기록을 저장하지 못했습니다. 저장 공간을 확인하세요.",
             provider_auth: "공급자 API 키와 접근 권한을 확인하세요.",
+            provider_output_budget: outputBudgetMessage,
             provider_limit: "공급자 요청 한도에 도달했습니다.",
             timeout: "응답 시간이 초과되었습니다.",
             provider_failed: workspaceScope && toolMode === "share_root_list"
