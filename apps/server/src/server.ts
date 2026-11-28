@@ -447,9 +447,18 @@ export function createChatServer(
     if (session && store && route?.[2] === "/section") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);
-      if (!body || typeof body !== "object" || !("sectionId" in body) || typeof body.sectionId !== "string")
+      if (!body || typeof body !== "object" || !("sectionId" in body)) throw new RequestError(400, "invalid_section");
+      const revision = "sectionRevision" in body ? body.sectionRevision : undefined;
+      if (revision !== undefined && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0))
         throw new RequestError(400, "invalid_section");
-      return json(store.linkSessionSection(session.id, body.sectionId));
+      if (body.sectionId === null && "previousSectionId" in body && typeof body.previousSectionId === "string" && revision !== undefined) {
+        if (checkpoints.isBusy(session.id)) throw new RequestError(409, "checkpoint_busy");
+        return json(store.changeSessionSection(session.id, null, body.previousSectionId, revision));
+      }
+      if (typeof body.sectionId !== "string" || ("previousSectionId" in body && body.previousSectionId !== null))
+        throw new RequestError(400, "invalid_section");
+      // Older clients can still make a first assignment, but cannot replay it after an unlink.
+      return json(store.changeSessionSection(session.id, body.sectionId, null, revision ?? 0));
     }
     if (session && store && route?.[2] === "/archive") {
       if (req.method !== "PUT") return allow("PUT");
@@ -544,7 +553,7 @@ export function createChatServer(
       session = store.get(session.id) ?? session;
       const state = await memoryFor(store, session.sectionId);
       const latest = store.get(session.id) ?? session;
-      if (latest.sectionId !== session.sectionId) throw new RequestError(409, "session_section_changed");
+      if (latest.sectionRevision !== session.sectionRevision) throw new RequestError(409, "session_section_changed");
       return json(contextFor(store, latest, body.message, state, body.limits));
     }
     if (session && store && !route?.[2]) {
@@ -585,11 +594,11 @@ export function createChatServer(
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
     if (session && store) session = store.get(session.id);
-    const sectionAtAdmission = session?.sectionId;
-    const state = session && store ? await memoryFor(store, sectionAtAdmission) : undefined;
+    const revisionAtAdmission = session?.sectionRevision;
+    const state = session && store ? await memoryFor(store, session.sectionId) : undefined;
     if (res.destroyed) return;
     if (session && store) session = store.get(session.id);
-    if (session?.sectionId !== sectionAtAdmission) throw new RequestError(409, "session_section_changed");
+    if (session?.sectionRevision !== revisionAtAdmission) throw new RequestError(409, "session_section_changed");
     const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
     const id = randomUUID();

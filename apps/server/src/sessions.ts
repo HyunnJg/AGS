@@ -24,7 +24,7 @@ import type { ModelSelection } from "../../../packages/contracts/src/providers.t
 import { maxTurnSearchResults, type TurnSearchHit, type TurnSearchResponse } from "../../../packages/contracts/src/sessions.ts";
 import { defaultSessionTitle, isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 10;
+export const sessionSchemaVersion = 11;
 
 // Before v9, an untouched session stored its placeholder as a real title.
 export function migrateUntitledSessions(db: DatabaseSync) {
@@ -32,8 +32,12 @@ export function migrateUntitledSessions(db: DatabaseSync) {
     .run(defaultSessionTitle);
 }
 
+export function migrateCheckpointSections(db: DatabaseSync) {
+  db.exec("UPDATE checkpoints SET sectionId=(SELECT sectionId FROM sessions WHERE id=checkpoints.session)");
+}
+
 const displayedTitle = `COALESCE(NULLIF(sessions.title,''),'${defaultSessionTitle}')`;
-const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId, projects.name || ' / ' || sections.name AS sectionLabel,
+const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId,sectionRevision, projects.name || ' / ' || sections.name AS sectionLabel,
   EXISTS(SELECT 1 FROM archived_sessions WHERE session_id=sessions.id) AS archived
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
   LEFT JOIN projects ON sections.projectId=projects.id`;
@@ -93,10 +97,6 @@ export class SessionStore {
           last TEXT NOT NULL REFERENCES turns(id), path TEXT NOT NULL UNIQUE, version TEXT NOT NULL,
           saved INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session,first)
         );
-        CREATE TRIGGER IF NOT EXISTS clear_checkpoints AFTER UPDATE OF root,identity ON projects
-        WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
-          DELETE FROM checkpoints WHERE session IN (SELECT t.id FROM sessions t JOIN sections s ON s.id=t.sectionId WHERE s.projectId=NEW.id);
-        END;
         CREATE TABLE IF NOT EXISTS turns (
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
           message TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
@@ -165,6 +165,17 @@ export class SessionStore {
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 9) {
         this.db.exec("CREATE TABLE IF NOT EXISTS archived_sessions(session_id TEXT PRIMARY KEY REFERENCES sessions(id)); PRAGMA user_version=10");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 10) {
+        this.db.exec(`ALTER TABLE sessions ADD COLUMN sectionRevision INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE checkpoints ADD COLUMN sectionId TEXT REFERENCES sections(id);
+          DROP TRIGGER IF EXISTS clear_checkpoints;
+          CREATE TRIGGER clear_checkpoints AFTER UPDATE OF root,identity ON projects
+          WHEN OLD.root IS NOT NEW.root OR OLD.identity IS NOT NEW.identity BEGIN
+            DELETE FROM checkpoints WHERE sectionId IN (SELECT id FROM sections WHERE projectId=NEW.id);
+          END;`);
+        migrateCheckpointSections(this.db);
+        this.db.exec("PRAGMA user_version=11");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -421,12 +432,13 @@ export class SessionStore {
       first
         ? this.db.prepare("SELECT * FROM checkpoints WHERE session=? AND first=?").get(session, first)
         : this.db.prepare("SELECT * FROM checkpoints WHERE session=? AND saved=0").get(session)
-    ) as { path: string; first: string; last: string; version: string; saved: number } | undefined;
+    ) as { sectionId: string; path: string; first: string; last: string; version: string; saved: number } | undefined;
   }
   reserveCheckpoint(session: string, first: string, last: string, path: string, version: string) {
-    this.db
-      .prepare("INSERT INTO checkpoints(session,first,last,path,version) VALUES(?,?,?,?,?)")
-      .run(session, first, last, path, version);
+    const result = this.db.prepare(`INSERT INTO checkpoints(session,first,last,path,version,sectionId)
+      SELECT id,?,?,?,?,sectionId FROM sessions WHERE id=? AND sectionId IS NOT NULL`)
+      .run(first, last, path, version, session);
+    if (!result.changes) throw new WorkspaceError(409, "session_section_changed");
   }
   finishCheckpoint(path: string, saved: boolean) {
     if (saved) this.db.prepare("UPDATE checkpoints SET saved=1 WHERE path=?").run(path);
@@ -434,8 +446,8 @@ export class SessionStore {
   }
   recentCheckpoints(section: string) {
     return this.db
-      .prepare(`SELECT c.path,c.version FROM checkpoints c JOIN sessions s ON s.id=c.session
-      WHERE s.sectionId=? AND c.saved=1 ORDER BY c.rowid DESC LIMIT 3`)
+      .prepare(`SELECT path,version FROM checkpoints
+      WHERE sectionId=? AND saved=1 ORDER BY rowid DESC LIMIT 3`)
       .all(section) as unknown as { path: string; version: string }[];
   }
   activeState(section: string) {
@@ -521,10 +533,11 @@ export class SessionStore {
     const row = this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id);
     return row && sessionFromRow(row);
   }
-  linkSessionSection(id: string, sectionId: string) {
-    if (!this.sectionExists(sectionId)) throw new WorkspaceError(400, "invalid_section");
+  changeSessionSection(id: string, sectionId: string | null, previous: string | null, revision: number) {
+    if (sectionId !== null && !this.sectionExists(sectionId)) throw new WorkspaceError(400, "invalid_section");
     if (this.isStreaming(id)) throw new WorkspaceError(409, "session_busy");
-    const changed = this.db.prepare("UPDATE sessions SET sectionId=? WHERE id=? AND sectionId IS NULL").run(sectionId, id);
+    const changed = this.db.prepare(`UPDATE sessions SET sectionId=?, sectionRevision=sectionRevision+1
+      WHERE id=? AND sectionId IS ? AND sectionRevision=?`).run(sectionId, id, previous, revision);
     if (!changed.changes) throw new WorkspaceError(409, "session_section_changed");
     return this.get(id);
   }

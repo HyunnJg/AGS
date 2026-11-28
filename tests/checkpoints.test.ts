@@ -78,7 +78,15 @@ test("체크포인트는 완료 턴 8개 단위로 전진하고 중복 승인과
   assert.equal((await loadCheckpoints(db, section))[0]?.text, "");
   db.setMemoryEnabled(false);
   assert.deepEqual(await loadCheckpoints(db, section), []);
+  db.changeSessionSection(session.id, null, section, 0);
+  const reassigned = db.changeSessionSection(session.id, other, null, 1);
+  assert.ok(reassigned);
+  assert.equal(db.recentCheckpoints(section)[0]?.path, a.path);
+  assert.deepEqual(db.recentCheckpoints(other), []);
+  await assert.rejects(service.run(db, reassigned, { ...b, action: "save", approved: true },
+    providers, dir, new AbortController().signal), /invalid_checkpoint/);
   db.linkRoot(project, root.path, null);
+  assert.deepEqual(db.recentCheckpoints(section), []);
   db.linkRoot(project, null, root, true);
   await assert.rejects(save(b), /invalid_checkpoint/);
 });

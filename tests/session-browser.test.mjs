@@ -949,6 +949,13 @@ test(
     const linkedPreview = await previewLink();
     assert.deepEqual(linkedPreview.memoryUse, restored.memoryUse);
     assert.ok(linkedPreview.messages.some(m => m.content.includes("발굴 조사 연표")));
+    const unlink = { sectionId:null, previousSectionId:target, sectionRevision:1 };
+    assert.ok((await page.request.put(`${linkPath}/section`, {headers, data:unlink})).ok());
+    assert.equal((await page.request.put(`${linkPath}/section`, {headers, data:{sectionId:target}})).status(), 409);
+    const detachedPreview = await previewLink();
+    assert.equal(detachedPreview.memoryUse.state, false);
+    assert.equal(detachedPreview.memoryUse.summaries, 0);
+    assert.deepEqual((await previewState()).memoryUse, restored.memoryUse);
     const connectionPath = `${base}/api/settings/connections/custom`;
     const connection = await (await page.request.get(connectionPath, { headers })).json();
     assert.equal(connection.defaultModel, "ui/test-model");
@@ -1085,7 +1092,7 @@ test(
     });
     assert.equal(stale.status(), 409);
     await page.getByText("연결 폴더 변경", { exact: true }).click();
-    await page.getByRole("button", { name: "연결 해제" }).click();
+    await page.getByRole("button", { name: "연결 해제", exact: true }).click();
     await page.getByRole("button", { name: "INDEX.md" }).waitFor({ state: "hidden" });
     const disconnected = await page.request.post(`${projectPath}/file`, {
       headers,
@@ -1563,6 +1570,28 @@ test(
     await page.getByRole("button", {name:"일반 대화 보기"}).click();
     await sessionNav.getByRole("button", {name:literal, exact:true}).waitFor();
     assert.equal(await composer.inputValue(), "보관한 초안");
+    await openWorkspace();
+    await panel.getByLabel("섹션 선택").selectOption(selectedSectionId);
+    const detach = panel.getByRole("button", {name:"현재 대화의 섹션 연결 해제"});
+    const oldChange = { sectionId: null, previousSectionId: selectedSectionId, sectionRevision: linked.session.sectionRevision };
+    await detach.click();
+    const relink = panel.getByRole("button", {name:"현재 대화를 ‘사료 검토’ 섹션에 연결"});
+    await relink.waitFor();
+    await relink.click();
+    await detach.waitFor();
+    assert.equal((await page.request.put(sectionUrl, {headers, data:oldChange})).status(), 409);
+    await detach.click();
+    await relink.waitFor();
+    await panel.getByRole("button", {name:"작업공간 닫기"}).click();
+    await stop();
+    await start(new URL(base).port);
+    await page.reload();
+    await page.getByRole("combobox", {name:"대화 목록 섹션"}).selectOption({label:"미소속 대화"});
+    await sessionNav.getByRole("button", {name:literal, exact:true}).click();
+    assert.equal(await composer.inputValue(), "보관한 초안");
+    const detached = await (await page.request.get(`${base}/api/sessions/${later.id}`, {headers})).json();
+    assert.equal(detached.session.sectionId, null);
+    assert.deepEqual(detached.turns, beforeLink.turns);
     assert.deepEqual(pageErrors, []);
   },
 );

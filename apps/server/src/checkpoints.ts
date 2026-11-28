@@ -81,6 +81,9 @@ async function summarize(
 
 export class CheckpointService {
   private busy = new Set<string>();
+  isBusy(id: string) {
+    return this.busy.has(id);
+  }
   async run(
     store: SessionStore,
     session: Session,
@@ -98,7 +101,7 @@ export class CheckpointService {
     if (!p.writeGrant) throw new WorkspaceError(403, "write_disabled");
     const root = { path: p.root, identity: p.identity },
       grant = p.writeGrant;
-    const binding = digest(grant);
+    const binding = digest(JSON.stringify([grant, session.sectionId, session.sectionRevision]));
     const check = () => {
       if (!store.updateMemoryEnabled()) throw new WorkspaceError(403, "checkpoint_disabled");
       if (store.project(projectId)?.writeGrant !== grant) throw new WorkspaceError(409, "folder_changed");
@@ -112,7 +115,12 @@ export class CheckpointService {
       if (pending) {
         let matches = false;
         try {
-          matches = digest((await readSnapshot(root, pending.path)).text) === pending.version;
+          const owner = store.sectionProject(pending.sectionId);
+          const original = owner ? store.project(owner) : undefined;
+          if (original?.root && original.identity) {
+            const snapshot = await readSnapshot({ path: original.root, identity: original.identity }, pending.path);
+            matches = digest(snapshot.text) === pending.version;
+          }
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
         }
