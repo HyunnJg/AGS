@@ -699,6 +699,7 @@ header h2 {
 .raw-reply {
   margin-top: 4px;
 }
+.raw-reply + .raw-reply, .raw-reply + output:not(:empty) { margin-inline-start: .4rem; }
 .display-rules output {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
