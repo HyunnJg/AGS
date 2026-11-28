@@ -1459,9 +1459,11 @@ test(
     await editor.getByRole("button",{name:"승인하고 검토 요청"}).click();
     const claudeReview = await (await claudeResult).json();
     assert.equal(claudeReview.reply,"Claude 검토 완료");
+    assert.ok((await page.request.put(`${base}/api/sessions/${claudeReview.reviewer}/archive`, { headers, data:{archived:true} })).ok());
     await editor.getByText("검토 이력 1건",{exact:true}).click();
     await editor.getByRole("button",{name:/Claude 독립 검토 확인.*대화 열기/}).click();
     await page.waitForFunction(id => sessionStorage.getItem("ags-session") === id, claudeReview.reviewer);
+    await page.getByRole("button", {name:"보관함에서 복원"}).waitFor();
     const claudeLogs = await (await page.request.get(`${base}/api/call-logs/export`, {headers})).json();
     const logged = claudeLogs.find(row => row.provider === "anthropic" && row.kind === "review");
     assert.deepEqual(logged.usage, {outputTokens: 7});
@@ -1494,6 +1496,7 @@ test(
     await page.getByRole("button", {name:"전송"}).click();
     const interruptedTurn = page.getByRole("article").filter({hasText:interruptedQuestion});
     await interruptedTurn.getByText("응답 중", {exact:true}).waitFor();
+    assert.equal((await page.request.put(`${sessionUrl}/archive`, {headers, data:{archived:true}})).status(), 409);
     assert.equal(await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).count(), 0);
     await stop("SIGKILL");
     await start(new URL(base).port);
@@ -1538,6 +1541,37 @@ test(
     await page.waitForFunction(session => sessionStorage.getItem("ags-session") === session &&
       document.activeElement?.tagName === "ARTICLE", later.id);
     assert.equal(await page.locator("article:focus .user-message").innerText(), literal);
+    const archiveUrl = `${base}/api/sessions/${later.id}/archive`;
+    const archive = page.getByRole("button", { name: "대화 보관", exact: true });
+    const restore = page.getByRole("button", { name: "보관함에서 복원", exact: true });
+    assert.equal((await page.request.put(archiveUrl, { data:{archived:true} })).status(), 401);
+    await composer.fill("보관한 초안");
+    await archive.click();
+    await restore.waitFor();
+    assert.equal(await sessionNav.getByRole("button", {name:literal, exact:true}).count(), 0);
+    assert.equal((await page.request.put(archiveUrl, { headers, data:{archived:true} })).status(), 409);
+    await stop();
+    await start(new URL(base).port);
+    await page.reload();
+    await restore.waitFor();
+    await page.getByRole("button", {name:"보관함 보기"}).click();
+    await sessionNav.getByRole("button", {name:literal, exact:true}).click();
+    assert.equal(await composer.inputValue(), "보관한 초안");
+    await openSearch.click();
+    await searchDialog.getByLabel("본문 검색어").fill(literal);
+    await searchDialog.getByRole("button", { name:"검색", exact:true }).click();
+    await searchDialog.getByRole("button").filter({hasText:/1턴.*질문/}).click();
+    await page.locator("article:focus").waitFor();
+    await page.getByRole("button", {name:"설정", exact:true}).click();
+    await page.getByRole("button", {name:"고급 기능"}).click();
+    const archivedFile = await readTranscript();
+    assert.ok(archivedFile.content.includes(literal));
+    await page.keyboard.press("Escape");
+    await restore.click();
+    await archive.waitFor();
+    await page.getByRole("button", {name:"일반 대화 보기"}).click();
+    await sessionNav.getByRole("button", {name:literal, exact:true}).waitFor();
+    assert.equal(await composer.inputValue(), "보관한 초안");
     assert.deepEqual(pageErrors, []);
   },
 );

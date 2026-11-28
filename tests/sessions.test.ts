@@ -47,6 +47,30 @@ test("중복 활성 턴을 막고 비정상 종료된 턴의 부분 텍스트와
   }
 });
 
+test("v9 작업실의 기존 대화를 유지하고 보관 상태를 재시작 후 복원한다", t => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-session-archive-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "sessions.sqlite");
+  let db = new SessionStore(path);
+  const { id } = db.create();
+  db.close();
+  const legacy = new DatabaseSync(path);
+  legacy.exec("DROP TABLE archived_sessions; PRAGMA user_version=9");
+  legacy.close();
+  db = new SessionStore(path);
+  assert.equal(db.get(id)?.archived, false);
+  db.setSessionArchived(id, true);
+  db.close();
+  db = new SessionStore(path);
+  try {
+    assert.equal(db.list()[0]?.archived, true);
+    db.setSessionArchived(id, false);
+    assert.equal(db.get(id)?.archived, false);
+  } finally {
+    db.close();
+  }
+});
+
 test("이전 CRLF 프리셋의 재등록은 기존 ID와 원본을 보존한다", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ags-preset-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

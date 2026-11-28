@@ -292,6 +292,24 @@ function Conversation({
       setError(problem(e));
     }
   }
+  const [savingArchive, setSavingArchive] = useState(false);
+  async function changeArchive() {
+    const archived = !session.archived;
+    setSavingArchive(true);
+    setError("");
+    try {
+      await api(token, `${path}/archive`, "PUT", { archived });
+      update({ id: session.id, archived });
+    } catch (e) {
+      setError(problem(e));
+      try {
+        const data = await (await api(token, path)).json();
+        update({ id: session.id, archived: data.session.archived });
+      } catch { /* Keep the original error visible. */ }
+    } finally {
+      setSavingArchive(false);
+    }
+  }
   const selectablePresets = customPresets.filter((item) => !item.archived || item.id === session.preset);
   return (
     <section className="conversation" hidden={!visible}>
@@ -300,6 +318,9 @@ function Conversation({
           {session.sectionLabel && <small>{session.sectionLabel}</small>}
           <ConversationTitle token={token} id={session.id} title={session.title}
             onTitle={title => update({ id: session.id, title })} />
+          <button type="button" disabled={savingArchive || busy || remoteStreaming || !ready} onClick={() => void changeArchive()}>
+            {session.archived ? "보관함에서 복원" : "대화 보관"}
+          </button>
         </div>
         <label className="preset">
           프리셋{" "}
@@ -444,11 +465,13 @@ function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
   const terms = sessionQuery.trim().normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
-  const visibleSessions = terms.length ? sessions.filter(session => {
+  const [showArchived, setShowArchived] = useState(false);
+  const visibleSessions = sessions.filter(session => {
+    if (Boolean(session.archived) !== showArchived) return false;
     const searchable = [session.title, session.sectionLabel, providerNames[session.provider], session.provider, session.model]
       .join(" ").normalize("NFC").toLowerCase();
     return terms.every(term => searchable.includes(term));
-  }) : sessions;
+  });
   const [id, setId] = useState("");
   const [searchHit, setSearchHit] = useState<TurnSearchHit>();
   const [sessionsReady, setSessionsReady] = useState(false);
@@ -530,7 +553,7 @@ function Workspace({ token }: { token: string }) {
         if (alive) {
           setDrafts(restoreDrafts(rows));
           setSessions(rows);
-          select(rows.find((s) => s.id === sessionStorage.getItem("ags-session"))?.id ?? rows[0]?.id ?? "");
+          select(rows.find((s) => s.id === sessionStorage.getItem("ags-session"))?.id ?? rows.find(s => !s.archived)?.id ?? "");
           setSessionsReady(true);
         }
       } catch (e) {
@@ -546,6 +569,7 @@ function Workspace({ token }: { token: string }) {
     try {
       const session: Session = await (await api(token, "/api/sessions", "POST")).json();
       setSessions((prev) => [session, ...prev]);
+      setShowArchived(false);
       select(session.id);
       setError("");
     } catch (e) {
@@ -609,8 +633,12 @@ function Workspace({ token }: { token: string }) {
           close();
           select(hit.sessionId, false, hit);
         }} />}
+        {(showArchived || sessions.some(s => s.archived)) && <button type="button" className="archive-list"
+          aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)}>
+          {showArchived ? "일반 대화 보기" : "보관함 보기"}
+        </button>}
         <nav aria-label="대화 목록">
-          {terms.length > 0 && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
+          {(terms.length > 0 || showArchived) && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
           {visibleSessions.map((s) => (
             <button
               type="button"

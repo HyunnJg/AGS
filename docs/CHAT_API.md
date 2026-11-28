@@ -30,11 +30,12 @@
 
 | 요청 | 결과 |
 |---|---|
-| GET /api/sessions | 최신 생성순 세션 목록 |
+| GET /api/sessions | 보관한 세션을 포함한 최신 생성순 세션 목록. archived는 보관 여부 |
 | POST /api/sessions | 일반 프리셋의 빈 세션 생성 (201) |
 | POST /api/sessions/search | `{query}`로 저장된 질문·답변을 검색한다. `{results,truncated}`를 반환한다. |
 | GET /api/sessions/{id} | 세션 설정과 시간순 턴 기록 |
 | PATCH /api/sessions/{id} | JSON의 preset 값 변경. 다음 턴부터 적용 |
+| PUT /api/sessions/{id}/archive | `{archived: boolean}`으로 보관·복원. 이미 요청한 상태이거나 응답 중이면 409 |
 | PUT /api/sessions/{id}/title | 이전 이름과 새 이름을 받아 대화 이름 변경 |
 | POST /api/sessions/{id}/chat | 기존 채팅 SSE 형식으로 응답하며 DB에 턴 저장. 같은 세션에서 응답 진행 중이면 409 |
 

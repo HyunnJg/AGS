@@ -24,7 +24,7 @@ import type { ModelSelection } from "../../../packages/contracts/src/providers.t
 import { maxTurnSearchResults, type TurnSearchHit, type TurnSearchResponse } from "../../../packages/contracts/src/sessions.ts";
 import { defaultSessionTitle, isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 9;
+export const sessionSchemaVersion = 10;
 
 // Before v9, an untouched session stored its placeholder as a real title.
 export function migrateUntitledSessions(db: DatabaseSync) {
@@ -33,9 +33,14 @@ export function migrateUntitledSessions(db: DatabaseSync) {
 }
 
 const displayedTitle = `COALESCE(NULLIF(sessions.title,''),'${defaultSessionTitle}')`;
-const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId, projects.name || ' / ' || sections.name AS sectionLabel
+const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId, projects.name || ' / ' || sections.name AS sectionLabel,
+  EXISTS(SELECT 1 FROM archived_sessions WHERE session_id=sessions.id) AS archived
   FROM sessions LEFT JOIN sections ON sessions.sectionId=sections.id
   LEFT JOIN projects ON sections.projectId=projects.id`;
+
+function sessionFromRow(row: Record<string, unknown>): Session {
+  return { ...row, archived: Boolean(row.archived) } as unknown as Session;
+}
 
 export class SessionStore {
   private db: DatabaseSync;
@@ -157,6 +162,9 @@ export class SessionStore {
       if (this.db.prepare("PRAGMA user_version").get()?.user_version === 8) {
         migrateUntitledSessions(this.db);
         this.db.exec("PRAGMA user_version=9");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 9) {
+        this.db.exec("CREATE TABLE IF NOT EXISTS archived_sessions(session_id TEXT PRIMARY KEY REFERENCES sessions(id)); PRAGMA user_version=10");
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -493,7 +501,7 @@ export class SessionStore {
     this.db.prepare(sql).run(provider, model);
   }
   list() {
-    return this.db.prepare(`${sessionQuery} ORDER BY sessions.rowid DESC`).all() as unknown as Session[];
+    return this.db.prepare(`${sessionQuery} ORDER BY sessions.rowid DESC`).all().map(sessionFromRow);
   }
   create(selection: ModelSelection = { provider: "mock", model: "" }, sectionId: string | null = null) {
     const session: Session = {
@@ -510,7 +518,15 @@ export class SessionStore {
     return this.get(session.id) ?? session;
   }
   get(id: string) {
-    return this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id) as unknown as Session | undefined;
+    const row = this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id);
+    return row && sessionFromRow(row);
+  }
+  setSessionArchived(id: string, archived: boolean) {
+    if (this.isStreaming(id)) throw new WorkspaceError(409, "archive_streaming");
+    const sql = archived
+      ? "INSERT OR IGNORE INTO archived_sessions(session_id) VALUES (?)"
+      : "DELETE FROM archived_sessions WHERE session_id=?";
+    if (!this.db.prepare(sql).run(id).changes) throw new WorkspaceError(409, "archive_changed");
   }
   turns(id: string) {
     return this.db

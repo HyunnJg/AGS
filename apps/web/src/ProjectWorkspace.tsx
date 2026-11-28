@@ -626,7 +626,7 @@ export function ProjectWorkspace({
                 섹션에서 새 대화
               </button>
               {sessions
-                .filter((s) => s.sectionId === section?.id)
+                .filter((s) => s.sectionId === section?.id && !s.archived)
                 .map((s) => (
                   <button type="button" key={s.id} onClick={() => openSession(s)}>
                     {s.title}
