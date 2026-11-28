@@ -650,7 +650,7 @@ test(
     await page.getByText("83–83 / 83줄").waitFor();
     await page.getByRole("button", { name: "섹션에서 새 대화" }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
-    await page.getByText(`${projectName} / 사료 검토`, { exact: true }).waitFor();
+    await page.locator(".conversation:visible header").getByText(`${projectName} / 사료 검토`, { exact: true }).waitFor();
     await page.getByLabel("메시지").fill("연표 확인");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("[mock] 수신한 메시지: 연표 확인", { exact: true }).waitFor();
