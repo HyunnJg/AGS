@@ -63,7 +63,7 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 ### 컨텍스트와 공용 지침
 
 - `GET /api/sessions/{id}/context`와 `PUT`은 대화별 `{turns,inputBudget,outputBudget}`를 읽고 저장한다. 기존 대화의 기본값은 `{turns:12,inputBudget:null,outputBudget:null}`이다. 예산은 양의 정수이며 빈 한도는 null로 보낸다.
-- `POST /api/sessions/{id}/context-preview`는 `{message,limits}`를 받아 실제 전송과 동일한 조립 코드로 메시지를 생성한다. 공급자 호출이나 대화 기록 쓰기는 없다. `blockUsage`는 고정 지침과 주입 순서의 각 블록에 대해 `estimatedTokens`, `includedMessages`, `omittedMessages`를 반환한다. 제외 수는 턴 수 설정과 참조 토글을 적용한 뒤 입력 예산으로 빠진 메시지만 센다. `inputCeiling`은 모델 출력 공간과 입력 예산을 반영한 입력 한도(최소 0)이며, 한도를 알 수 없고 별도 입력 예산도 없으면 null이다. 이전 턴은 사용자·응답 쌍 단위로 포함한다. 입력량은 메시지별 UTF-8 바이트 수 + 8로 추정하며 공급자 사용량과 다를 수 있다. 모델 목록에서 해당 모델의 컨텍스트 길이를 알고 있으면 그 범위에서 지정 출력량을 예약한다. 필수 입력이 예산을 넘으면 미리보기의 `fits`는 false이며 전송은 422로 거절한다. Anthropic은 미지정 일반 채팅에 4,096토큰을 예약해 미리보기와 전송에 적용한다. 다른 공급자는 출력 한도가 설정된 경우에만 전달한다. OpenAI 직접 연결은 `max_completion_tokens`, Gemini는 `generationConfig.maxOutputTokens`, 나머지 호환 공급자는 `max_tokens`를 쓴다.
+- `POST /api/sessions/{id}/context-preview`는 `{message,limits}`를 받아 실제 전송과 동일한 조립 코드로 메시지를 생성한다. 공급자 호출이나 대화 기록 쓰기는 없다. `blockUsage`는 고정 지침과 주입 순서의 각 블록에 대해 `estimatedTokens`, `includedMessages`, `omittedMessages`를 반환한다. 제외 수는 턴 수 설정과 참조 토글을 적용한 뒤 입력 예산으로 빠진 메시지만 센다. `inputCeiling`은 모델 출력 공간과 입력 예산을 반영한 입력 한도(최소 0)이며, 한도를 알 수 없고 별도 입력 예산도 없으면 null이다. 이전 턴은 사용자·응답 쌍 단위로 포함한다. 입력량은 메시지별 UTF-8 바이트 수 + 8로 추정하며 공급자 사용량과 다를 수 있다. 모델 목록에서 해당 모델의 컨텍스트 길이를 알고 있으면 그 범위에서 지정 출력량을 예약한다. 필수 입력이 예산을 넘으면 미리보기의 `fits`는 false이며 전송은 422로 거절한다. Anthropic은 미지정 일반 채팅에 4,096토큰을 예약해 미리보기와 전송에 적용한다. 다른 공급자는 출력 한도가 설정된 경우에만 전달한다. OpenAI 일반 대화는 `max_completion_tokens`, OpenAI 폴더 공유는 `max_output_tokens`, Gemini는 `generationConfig.maxOutputTokens`, 나머지 호환 공급자는 `max_tokens`를 쓴다.
 - `GET /api/settings/prompt`는 `{prompt,order}`를 반환한다. `PUT`에 `{prompt,previous}`를 보내면 최대 4,000자의 전역 지침을 저장한다. 다른 창이 먼저 수정해 기존 값이 달라지면 409를 반환한다. 순서도 변경할 때는 기존 previous와 함께 order 및 previousOrder를 보낸다. memory, history, retrieval, input을 각각 한 번 포함해야 하며 지침과 순서는 함께 저장한다. 인증·접근 권한은 서버 측에서 별도로 검증한다.
 - `GET /api/sessions/{id}/sources`와 `PUT`은 세션별 수동 참고 자료 `{memory,retrieval,revision}`를 읽고 저장한다. 저장할 때 읽은 revision이 달라지면 409다. 각 자료는 최대 6,000자이다. 참고 자료는 user 역할로 전달하고, 완료 턴은 원래 역할로 전달한다.
 - `GET /api/settings/presets`는 등록한 분야 지침의 `[{id,name}]`을 반환한다. `POST`는 `{name,instructions}`(이름 최대 80, 본문 최대 8,000 UTF-16 코드 단위)를 받고 저장한 정의를 반환한다. 새 본문은 CRLF와 CR을 LF로 바꾼 뒤 길이를 검사하고 저장한다. 기존 본문은 등록 당시 형식을 보존한다. 줄바꿈 형식만 다른 재등록을 포함해 같은 이름과 본문의 재요청은 같은 ID, 같은 이름과 다른 본문은 409다. `GET /api/settings/presets/{id}`는 해당 본문을 포함한다. 모두 로컬 인증이 필요하다.
@@ -115,7 +115,9 @@ mock에서 메시지 `폴더 목록`은 루트를, `폴더 목록 “자료/전�
 
 같은 `GET /api/sessions/{id}/workspace-read` 응답에 `provider`, `model`, `sectionId`, `sectionRevision`이 포함된다. 클라이언트는 현재 화면과 일치하는지 확인한다. OpenAI로 폴더 이름을 공유하려면 해당 턴의 POST 본문에 `workspaceScope`와 `workspaceShare: "openai_root_names"`가 모두 필요하다. 서버는 모델·소속·등록 폴더·OpenAI 연결 리비전에 범위를 결부한다. 공유 표시와 범위가 일치하지 않으면 409다.
 
-첫 Chat Completions 요청에는 인자가 없는 `list_entries`만 제공한다. 직접 답변은 그대로 표시한다. 같은 이름의 함수 1개와 빈 객체 인자가 확인되면 최상위 목록을 조회한다. 기존 mock과 같은 탐색 범위와 반환 한도를 적용하며 도구 결과에는 항목 이름·폴더 여부와 제한 표시만 포함한다. 두 번째 요청은 첫 함수 호출 ID와 연결한 `tool` 메시지로 결과를 전달하며 도구 없이 스트리밍한다. 각 HTTP 요청은 독립된 호출 로그가 된다. 입력 한도에는 도구 정의 또는 후속 메시지 비용을 합산하며 설정된 출력 한도는 첫 응답의 공급자 보고 사용량만큼 차감한다. 후속 요청의 예산이 부족하면 `workspace_tool_budget`으로 종료한다. 두 요청은 하나의 취소 신호와 전체 마감 시간을 공유한다. 이후의 자동 대화 이력·구간 요약에는 폴더를 조회했던 턴의 답변 대신 조회 안내문이 들어간다.
+공유를 허용한 OpenAI 직접 연결은 두 단계 모두 `POST /v1/responses`와 `store: false`를 사용한다. 첫 요청은 인자 없는 `list_entries`만 제공한다. 모델이 직접 답하면 종료한다. 완료된 단일 함수 호출과 빈 객체 인자를 확인하면 기존 mock과 같은 한도로 최상위 목록을 조회한다. 결과에는 항목 이름·폴더 여부·제한 표시만 포함한다.
+
+두 번째 요청은 원래 입력에 첫 응답의 출력 항목(암호화한 추론 포함)과 같은 `call_id`의 `function_call_output`을 붙여 도구 없이 스트리밍한다. 각 HTTP 응답을 따로 기록한다. 후속 입력 한도에는 재전송하는 모든 출력 항목과 도구 결과를 반영하고 출력 한도(`max_output_tokens`)에서 첫 응답의 `usage.output_tokens`를 차감한다. 이 수치에는 추론 토큰이 이미 포함된다. Responses 출력 한도가 지정된 경우 각 요청에 최소 16토큰이 필요하다. 후속 요청의 예산이 부족하면 `workspace_tool_budget`으로 종료한다. 두 요청은 하나의 취소 신호와 전체 마감 시간을 공유한다. 이후의 자동 대화 이력·구간 요약에는 폴더를 조회했던 턴의 답변 대신 조회 안내문이 들어간다.
 
 ### Anthropic (Claude) 직접 연결의 최상위 목록 공유
 
@@ -176,7 +178,7 @@ Anthropic은 워크스페이스 전용 키를 Bearer 헤더로 전송한다. `an
 
 상세에는 호출 종류·세션·모델·시작 시각·소요 시간·종료 상태·HTTP 상태, 응답 헤더, 수신한 본문과 조립한 답변이 들어간다. 본문은 fetch가 디코딩한 HTTP 스트림에서 실제 읽은 UTF-8 텍스트이며 SSE 주석·usage·종료 프레임도 포함한다. 응답 헤더는 콘텐츠 형식·요청 ID·속도 제한 등 진단용 값만 표시한다. 응답이 없는 경우 HTTP 상태는 null이다. 목록 캐시 적중은 새 호출을 만들지 않는다. 완료·실패·중단·시간 초과 시 저장하며 프로세스 강제 종료 전 끝나지 않은 호출은 기록되지 않는다. `bodyLimited` 및 `answerLimited`는 수집 상한 도달 등으로 일부만 보존되었음을 뜻한다.
 
-공급자 채팅 요청을 시도한 호출의 상세와 JSON 내보내기에는 `request`가 포함된다. `messageCount`는 전송 메시지 수, `contentBytes`는 각 메시지 `content`의 UTF-8 바이트 수 합계, `maxTokens`는 OpenAI 직접 연결의 `max_completion_tokens` 또는 Gemini의 `generationConfig.maxOutputTokens`, 호환 공급자의 `max_tokens` 값이며 미지정 시 null이다. 로컬 mock·모델 목록 조회 및 이전 버전에서 저장한 기록에서는 이 필드를 생략한다.
+공급자 채팅 요청을 시도한 호출의 상세와 JSON 내보내기에는 `request`가 포함된다. `messageCount`는 전송 메시지 수, `contentBytes`는 각 메시지 `content`의 UTF-8 바이트 수 합계, `maxTokens`는 OpenAI 일반 대화의 `max_completion_tokens`, OpenAI 폴더 공유의 `max_output_tokens`, Gemini의 `generationConfig.maxOutputTokens`, 호환 공급자의 `max_tokens` 값이며 미지정 시 null이다. 로컬 mock·모델 목록 조회 및 이전 버전에서 저장한 기록에서는 이 필드를 생략한다.
 
 새 공급자 일반 채팅의 상세 및 내보내기에는 조립 당시의 `contextBudget`이 포함된다. `estimatedInput`, `inputCeiling`, `blockUsage`는 미리보기와 같은 의미이며 AGS의 추정치다. 입력 원문은 이 필드에 저장하지 않는다. 로컬 mock, 독립 검토, 구간 요약, 모델 목록 조회 및 이전 기록은 이 필드를 생략한다.
 
