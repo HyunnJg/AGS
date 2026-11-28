@@ -163,7 +163,7 @@ Anthropic은 워크스페이스 전용 키를 Bearer 헤더로 전송한다. `an
 
 ### 독립 모델 검토
 
-`GET/PUT /api/settings/collaboration`은 협업 허용 여부(`enabled`, 기본 false)를 조회·변경한다. 끄면 새 검토 호출을 막는다. `POST /api/sessions/{id}/review`는 클라이언트가 생성한 UUID `id`, `target: {provider, model}`, `message`(1–8,000자), `approved: true`를 받는다. 승인된 본문과 고정 검토 지침으로 별도 세션에서 한 번 호출하며 외부 모델의 최대 출력은 1,200토큰이다. 같은 ID로 같은 요청을 재전송하면 기존 상태를 반환한다. 동일 원본 대화에서 서로 다른 검토를 동시에 요청하면 409다. HTTP 연결 중단 또는 서버의 전체 시간 제한은 진행 중인 호출을 중지한다.
+`GET/PUT /api/settings/collaboration`은 협업 허용 여부(`enabled`, 기본 false)를 조회·변경한다. 끄면 새 검토 호출을 막는다. `POST /api/sessions/{id}/review`는 클라이언트가 생성한 UUID `id`, `target: {provider, model}`, `message`(1–8,000자), `approved: true`를 받는다. 승인된 본문과 고정 검토 지침으로 별도 세션에서 한 번 호출하며 외부 모델의 최대 출력은 4,096토큰이다. 추론 모델에서는 사고 토큰도 이 예산을 사용한다. 모델의 컨텍스트 창을 확인할 때 같은 출력 예산을 예약하며 호출 로그의 `request.maxTokens`에 실제 요청 한도를 기록한다. Gemini의 `MAX_TOKENS`, OpenAI 호환의 `length`, Claude의 `max_tokens`로 정상 종료됐지만 표시할 답변이 없으면 HTTP 502와 `provider_output_budget`을 반환한다. 같은 ID로 같은 요청을 재전송하면 기존 상태를 반환한다. 동일 원본 대화에서 서로 다른 검토를 동시에 요청하면 409다. HTTP 연결 중단 또는 서버의 전체 시간 제한은 진행 중인 호출을 중지한다.
 
 `GET /api/sessions/{id}/review`는 최근 검토 또는 null을 반환한다. 결과에는 요청 ID, 독립 세션 ID(`reviewer`), 선택한 모델, 보낸 본문, 응답, 상태가 포함된다. `GET /api/sessions/{id}/review/{reviewId}`는 해당 대화가 요청한 검토 한 건을 같은 형식으로 반환한다. 요청 ID가 없거나 다른 대화에 속하면 404다. 조회에는 모델 호출이 발생하지 않는다. 재시작 시 실행 중이던 검토는 interrupted로 복구한다. 결과의 작업 폴더 저장은 일반 파일 생성과 같은 제안·승인 경로를 사용한다.
 

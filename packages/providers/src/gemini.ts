@@ -1,4 +1,5 @@
 import type { CallCapture } from "./capture.ts";
+import { ProviderError } from "./errors.ts";
 import type { Decision } from "./folder-tools.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
@@ -85,7 +86,7 @@ export function geminiDecision(body: ReturnType<typeof JSON.parse>, capture?: Ca
 }
 
 export async function* geminiReply(events: AsyncIterable<string>, capture?: CallCapture, finalFolderRound = false) {
-  let finished = false;
+  let finishReason: string | undefined;
   let hasText = false;
   for await (const data of events) {
     const chunk = JSON.parse(data);
@@ -98,26 +99,18 @@ export async function* geminiReply(events: AsyncIterable<string>, capture?: Call
       throw new Error("invalid_gemini_folder_response");
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue; // Usage-only frame.
-    if (finished) throw new Error("unexpected_candidate");
+    if (finishReason) throw new Error("unexpected_candidate");
     const reason = candidate.finishReason;
     const terminal = reason && reason !== "FINISH_REASON_UNSPECIFIED";
     if (terminal && !["STOP", "MAX_TOKENS"].includes(reason)) throw new Error("gemini_finish_failed");
     for (const part of candidate.content?.parts ?? []) {
       if (!part.thought && typeof part.text === "string" && part.text) {
-        hasText = true;
+        if (part.text.trim()) hasText = true;
         yield part.text;
       }
     }
-    if (terminal) finished = true;
+    if (terminal) finishReason = reason;
   }
-  if (!finished || !hasText) throw new Error("incomplete_gemini_reply");
-}
-
-export function invalidGeminiKey(body: string) {
-  try {
-    const details = JSON.parse(body).error?.details;
-    return Array.isArray(details) && details.some((item) => item?.reason === "API_KEY_INVALID");
-  } catch {
-    return false;
-  }
+  if (!hasText && finishReason === "MAX_TOKENS") throw new ProviderError("provider_output_budget");
+  if (!finishReason || !hasText) throw new Error("incomplete_gemini_reply");
 }

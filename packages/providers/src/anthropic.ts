@@ -1,3 +1,4 @@
+import { ProviderError } from "./errors.ts";
 import type { CallCapture } from "./capture.ts";
 import type { Message } from "../../contracts/src/context.ts";
 
@@ -43,6 +44,7 @@ export async function* anthropicReply(events: AsyncIterable<string>, capture?: C
     }
     if (event.type === "message_delta" && event.delta?.stop_reason) reason = event.delta.stop_reason;
     if (event.type === "message_stop") {
+      if (started && !hasText && reason === "max_tokens") throw new ProviderError("provider_output_budget");
       if (
         started &&
         hasText &&
@@ -63,7 +65,7 @@ export async function* anthropicReply(events: AsyncIterable<string>, capture?: C
           : undefined;
     if (typeof text === "string" && text) {
       if (!started) throw new Error("missing_message_start");
-      hasText = true;
+      if (text.trim()) hasText = true;
       yield text;
     }
   }

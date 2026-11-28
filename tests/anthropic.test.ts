@@ -80,6 +80,13 @@ test("Claude는 전용 키·버전·출력 예산을 보내고 완결된 텍스�
     uncachedInputTokens: 8, cachedInputTokens: 48, cacheWriteTokens: 0, outputTokens: 4,
   });
   budget = 1200;
+  events = [
+    { type: "message_start" },
+    { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "internal" } },
+    { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 1200 } },
+    { type: "message_stop" },
+  ];
+  await assert.rejects(run(), /provider_output_budget/);
   for (const suffix of [[], [{ type: "error" }]]) {
     events = [...complete.slice(0, 4), ...suffix];
     await assert.rejects(run(), /provider_failed/);

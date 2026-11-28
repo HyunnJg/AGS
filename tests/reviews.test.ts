@@ -37,7 +37,7 @@ test("독립 검토는 승인한 내용만 한 번 보내며 실패·취소·재
     assert.equal(payload.messages.length, 2);
     assert.deepEqual(payload.messages[1], { role: "user", content: body.message });
     assert.ok(!JSON.stringify(payload).includes("비공개"));
-    assert.equal(payload.max_tokens, 1200);
+    assert.equal(payload.max_tokens, 4096);
     if (fail) return new Response("", { status: 503 });
     return new Response('data: {"choices":[{"delta":{"content":"검토 의견"}}]}\n\ndata: [DONE]\n\n', {
       headers: { "content-type": "text/event-stream" },
@@ -47,6 +47,10 @@ test("독립 검토는 승인한 내용만 한 번 보내며 실패·취소·재
     runReview(db, source.id, input, adapters, signal);
   await assert.rejects(run(body), /review_disabled/);
   db.setCollaborationEnabled(true);
+  await assert.rejects(
+    runReview(db, source.id, body, { ...adapters, contextWindow: () => 4096 }, new AbortController().signal),
+    /review_budget/,
+  );
   await assert.rejects(run({ ...body, approved: false }), /invalid_review/);
   assert.equal(count, 0);
   const running = run(body);
