@@ -52,13 +52,22 @@ test("v9 작업실의 기존 대화를 유지하고 보관 상태를 재시작 �
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "sessions.sqlite");
   let db = new SessionStore(path);
-  const { id } = db.create();
+  const project = db.addProject("기존 프로젝트");
+  const section = db.addSection(project, "이전 섹션");
+  const session = db.create(undefined, section);
+  const { id } = session;
+  db.begin(session, "source", "기존 결정");
+  db.finish("source", "completed");
+  db.reserveCheckpoint(id, "source", "source", "saved.md", "version");
+  db.finishCheckpoint("saved.md", true);
   db.close();
   const legacy = new DatabaseSync(path);
-  legacy.exec("DROP TABLE archived_sessions; PRAGMA user_version=9");
+  legacy.exec("DROP TRIGGER clear_checkpoints; ALTER TABLE checkpoints DROP COLUMN sectionId; ALTER TABLE sessions DROP COLUMN sectionRevision; DROP TABLE archived_sessions; PRAGMA user_version=9");
   legacy.close();
   db = new SessionStore(path);
   assert.equal(db.get(id)?.archived, false);
+  db.changeSessionSection(id, null, section, 0);
+  assert.equal(db.recentCheckpoints(section)[0]?.path, "saved.md");
   db.setSessionArchived(id, true);
   db.close();
   db = new SessionStore(path);
@@ -79,7 +88,7 @@ test("이전 CRLF 프리셋의 재등록은 기존 ID와 원본을 보존한다"
   const old = new DatabaseSync(path);
   const id = "custom-00000000-0000-4000-8000-000000000001";
   const original = "# 원칙\r\n근거를 확인한다.\r\n";
-  old.exec("ALTER TABLE custom_presets DROP COLUMN archived; PRAGMA user_version=7");
+  old.exec("DROP TRIGGER clear_checkpoints; ALTER TABLE checkpoints DROP COLUMN sectionId; ALTER TABLE sessions DROP COLUMN sectionRevision; ALTER TABLE custom_presets DROP COLUMN archived; PRAGMA user_version=7");
   old.prepare("INSERT INTO custom_presets VALUES(?,?,?)").run(id, "역사", original);
   old.close();
   const store = new SessionStore(path);
@@ -155,7 +164,7 @@ test("기존 파일 첨부를 유지하고 지식 참조 설정을 재시작 후
   const file = store.addReference(session.id, project, "이전.md", "v1", 1, 1, "파일");
   store.close();
   const old = new DatabaseSync(path);
-  old.exec("DROP TABLE custom_presets; ALTER TABLE shared_prompt DROP COLUMN responseLanguage; ALTER TABLE file_references DROP COLUMN kind; DROP TABLE reviews; PRAGMA user_version=3");
+  old.exec("DROP TRIGGER clear_checkpoints; ALTER TABLE checkpoints DROP COLUMN sectionId; ALTER TABLE sessions DROP COLUMN sectionRevision; DROP TABLE custom_presets; ALTER TABLE shared_prompt DROP COLUMN responseLanguage; ALTER TABLE file_references DROP COLUMN kind; DROP TABLE reviews; PRAGMA user_version=3");
   old.close();
   store = new SessionStore(path);
   try {

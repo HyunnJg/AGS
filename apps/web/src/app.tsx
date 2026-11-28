@@ -384,7 +384,7 @@ function Conversation({
           choices={reviewChoices} references={references.refs}
           turns={turns}
           insert={value=>editDraft(text ? `${text}\n\n${value}` : value)} onCreated={onReviewer} />
-        {session.sectionId && <CheckpointEditor token={token} session={session} />}
+        {session.sectionId && <CheckpointEditor key={session.sectionRevision} token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} references={references} />
         <form onSubmit={send}>
@@ -461,6 +461,11 @@ function restoreDrafts(sessions: Session[]) {
   return drafts;
 }
 
+function sectionFields(current: Session, patch: Partial<Session>) {
+  const latest = patch.sectionRevision !== undefined && patch.sectionRevision >= (current.sectionRevision ?? 0) ? patch : current;
+  return { sectionId: latest.sectionId, sectionLabel: latest.sectionLabel, sectionRevision: latest.sectionRevision };
+}
+
 function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -472,6 +477,11 @@ function Workspace({ token }: { token: string }) {
     }
     return [...sections].sort(([, a], [, b]) => a.localeCompare(b, "ko"));
   }, [sessions]);
+  useEffect(() => {
+    if (sectionFilter && sectionFilter !== "unassigned" && !sectionOptions.some(([id]) => id === sectionFilter)) {
+      setSectionFilter("");
+    }
+  }, [sectionOptions, sectionFilter]);
   const terms = sessionQuery.trim().normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
   const [showArchived, setShowArchived] = useState(false);
   const visibleSessions = sessions.filter(session => {
@@ -690,8 +700,8 @@ function Workspace({ token }: { token: string }) {
           token={token}
           current={currentSession}
           streaming={running.includes(id) || Boolean(id && remoteId === id)}
-          onSectionLinked={linked => setSessions(prev => prev.map(s => s.id === linked.id
-            ? { ...s, sectionId: linked.sectionId, sectionLabel: linked.sectionLabel } : s))}
+          onSectionChanged={linked => setSessions(prev => prev.map(s => s.id === linked.id
+            ? { ...s, ...sectionFields(s, linked) } : s))}
           sessions={sessions}
           close={() => setProjectsOpen(false)}
           openSession={(s) => {
@@ -730,7 +740,11 @@ function Workspace({ token }: { token: string }) {
             onReviewer={async (reviewer, open) => {
               try {
                 const data = await (await api(token,`/api/sessions/${reviewer}`)).json();
-                setSessions(prev => [data.session,...prev.filter(s=>s.id!==reviewer)]);
+                setSessions(prev => {
+                  const existing = prev.find(s => s.id === reviewer);
+                  const next = existing ? { ...data.session, ...sectionFields(existing, data.session) } : data.session;
+                  return [next, ...prev.filter(s => s.id !== reviewer)];
+                });
                 if (open) select(reviewer);
               } catch (e) { setError(problem(e)); }
             }}
@@ -743,8 +757,7 @@ function Workspace({ token }: { token: string }) {
               if (item.id !== patch.id) return item;
               // A chat refresh can arrive after an explicit rename has already succeeded.
               const title = previousTitle === undefined || previousTitle === item.title ? patch.title : item.title;
-              return { ...item, ...patch, sectionId: item.sectionId ?? patch.sectionId,
-                sectionLabel: item.sectionLabel ?? patch.sectionLabel, title: title ?? item.title };
+              return { ...item, ...patch, ...sectionFields(item, patch), title: title ?? item.title };
             }))}
           />
         ))

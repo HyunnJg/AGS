@@ -46,6 +46,7 @@ export function validSessionTitle(value: unknown): value is string {
 export interface Session extends ModelSelection {
   archived?: boolean;
   sectionId?: string | null;
+  sectionRevision?: number;
   sectionLabel?: string | null;
   id: string;
   title: string;

@@ -142,6 +142,7 @@ export async function api(
     if (path.endsWith("/section") && res.status === 400) throw new Error("연결할 섹션을 다시 선택하세요.");
     if (res.status === 409) {
       const body = await res.json().catch(() => ({}));
+      if (body.error === "checkpoint_busy") throw new Error(workspaceMessages.checkpoint_busy);
       if (body.error === "session_section_changed") throw new Error("대화 소속이 이미 변경됐습니다. 현재 섹션을 확인하세요.");
       throw new Error("이 대화에서 응답이 진행 중입니다.");
     }

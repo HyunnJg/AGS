@@ -467,7 +467,7 @@ export function ProjectWorkspace({
   current,
   close,
   openSession,
-  onSectionLinked,
+  onSectionChanged,
   streaming,
 }: {
   token: string;
@@ -475,7 +475,7 @@ export function ProjectWorkspace({
   current?: Session | undefined;
   close: () => void;
   openSession: (session: Session) => void;
-  onSectionLinked: (session: Session) => void;
+  onSectionChanged: (session: Session) => void;
   streaming: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -535,19 +535,21 @@ export function ProjectWorkspace({
     setCatalog(data);
     if (id !== project?.id) choose(id);
   }
-  async function linkCurrentSession() {
-    if (!current || current.sectionId || !section || busy) return;
+  async function changeCurrentSection(sectionId: string | null) {
+    if (!current || busy) return;
     const path = `/api/sessions/${current.id}`;
     setBusy(true);
     setError("");
     try {
-      const response = await api(token, `${path}/section`, "PUT", { sectionId: section.id });
-      onSectionLinked(await response.json());
+      const response = await api(token, `${path}/section`, "PUT", {
+        sectionId, previousSectionId: current.sectionId ?? null, sectionRevision: current.sectionRevision,
+      });
+      onSectionChanged(await response.json());
     } catch (e) {
       setError(message(e));
       try {
         const data = await (await api(token, path)).json();
-        onSectionLinked(data.session);
+        onSectionChanged(data.session);
       } catch { /* Preserve the original error if the session cannot be refreshed. */ }
     } finally {
       setBusy(false);
@@ -649,8 +651,13 @@ export function ProjectWorkspace({
                 섹션에서 새 대화
               </button>
               {current && !current.sectionId && section && (
-                <button type="button" disabled={busy || streaming} onClick={() => void linkCurrentSession()}>
+                <button type="button" disabled={busy || streaming} onClick={() => void changeCurrentSection(section.id)}>
                   현재 대화를 ‘{section.name}’ 섹션에 연결
+                </button>
+              )}
+              {current?.sectionId && current.sectionId === section?.id && (
+                <button type="button" disabled={busy || streaming} onClick={() => void changeCurrentSection(null)}>
+                  현재 대화의 섹션 연결 해제
                 </button>
               )}
               {sessions
