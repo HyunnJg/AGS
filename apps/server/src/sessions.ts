@@ -521,6 +521,13 @@ export class SessionStore {
     const row = this.db.prepare(`${sessionQuery} WHERE sessions.id=?`).get(id);
     return row && sessionFromRow(row);
   }
+  linkSessionSection(id: string, sectionId: string) {
+    if (!this.sectionExists(sectionId)) throw new WorkspaceError(400, "invalid_section");
+    if (this.isStreaming(id)) throw new WorkspaceError(409, "session_busy");
+    const changed = this.db.prepare("UPDATE sessions SET sectionId=? WHERE id=? AND sectionId IS NULL").run(sectionId, id);
+    if (!changed.changes) throw new WorkspaceError(409, "session_section_changed");
+    return this.get(id);
+  }
   setSessionArchived(id: string, archived: boolean) {
     if (this.isStreaming(id)) throw new WorkspaceError(409, "archive_streaming");
     const sql = archived

@@ -439,11 +439,18 @@ export function createChatServer(
       return json(store.references(sessionId));
     }
     const route =
-      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title|\/archive)?$/.exec(
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title|\/archive|\/section)?$/.exec(
         path,
       );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/section") {
+      if (req.method !== "PUT") return allow("PUT");
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || !("sectionId" in body) || typeof body.sectionId !== "string")
+        throw new RequestError(400, "invalid_section");
+      return json(store.linkSessionSection(session.id, body.sectionId));
+    }
     if (session && store && route?.[2] === "/archive") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);
@@ -534,8 +541,11 @@ export function createChatServer(
         !isLimits(body.limits)
       )
         throw new RequestError(400, "invalid_preview");
+      session = store.get(session.id) ?? session;
       const state = await memoryFor(store, session.sectionId);
-      return json(contextFor(store, store.get(session.id) ?? session, body.message, state, body.limits));
+      const latest = store.get(session.id) ?? session;
+      if (latest.sectionId !== session.sectionId) throw new RequestError(409, "session_section_changed");
+      return json(contextFor(store, latest, body.message, state, body.limits));
     }
     if (session && store && !route?.[2]) {
       if (req.method === "GET") return json({ session, turns: store.turns(session.id) });
@@ -574,9 +584,12 @@ export function createChatServer(
     const { message } = body;
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
-    const state = session && store ? await memoryFor(store, session.sectionId) : undefined;
+    if (session && store) session = store.get(session.id);
+    const sectionAtAdmission = session?.sectionId;
+    const state = session && store ? await memoryFor(store, sectionAtAdmission) : undefined;
     if (res.destroyed) return;
     if (session && store) session = store.get(session.id);
+    if (session?.sectionId !== sectionAtAdmission) throw new RequestError(409, "session_section_changed");
     const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
     const id = randomUUID();

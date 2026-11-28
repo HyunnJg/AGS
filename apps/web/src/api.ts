@@ -139,7 +139,12 @@ export async function api(
       (path === "/api/settings/prompt" || path === "/api/settings/response-language" || path.endsWith("/sources") || path === "/api/settings/display-rules")
     )
       throw new SettingsConflict();
-    if (res.status === 409) throw new Error("이 대화에서 응답이 진행 중입니다.");
+    if (path.endsWith("/section") && res.status === 400) throw new Error("연결할 섹션을 다시 선택하세요.");
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({}));
+      if (body.error === "session_section_changed") throw new Error("대화 소속이 이미 변경됐습니다. 현재 섹션을 확인하세요.");
+      throw new Error("이 대화에서 응답이 진행 중입니다.");
+    }
     throw new Error(`요청을 완료하지 못했습니다 (HTTP ${res.status}).`);
   }
   return res;
