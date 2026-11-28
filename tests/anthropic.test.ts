@@ -153,3 +153,15 @@ test("Claude 폴더 조회는 단일 빈 인자 호출만 수락하고 결과 �
     }
   }, /provider_failed/);
 });
+
+test("Claude 폴더 조회의 첫 로그에는 실제 전송한 기본 출력 한도가 남는다", async () => {
+  const logs: CallLog[] = [];
+  const api = configureProviders(env, async (_url, init) => {
+    assert.equal(JSON.parse(String(init?.body)).max_tokens, 4096);
+    return Response.json({ type: "message", role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "답" }] });
+  });
+  const capture = new CallCapture("chat", target, null, log => logs.push(log));
+  await api.folderDecision(target, [], new AbortController().signal, () => {}, null, capture);
+  capture.finish("completed");
+  assert.equal(logs[0]?.request?.maxTokens, 4096);
+});

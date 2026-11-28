@@ -1794,20 +1794,38 @@ test("mock 대화에서 한 번 허용한 폴더 검색의 근거와 기록을 �
   assert.deepEqual(pageErrors, []);
 });
 
-for (const provider of ["openai", "anthropic"]) test(`${provider}에 허용한 최상위 이름만 보내고 한 턴 뒤 공유를 해제한다`, { timeout: 90_000 }, async t => {
+const sharingProviders = {
+  openai: { label: /OpenAI에 공유 허용/, endpoint: "/openai/v1/chat/completions" },
+  anthropic: { label: /Claude\)에 공유 허용/, endpoint: "/anthropic/v1/messages" },
+  gemini: { label: /Google Gemini에 공유 허용/, endpoint: "/gemini/v1beta/models/fixture:generateContent" },
+};
+for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허용한 최상위 이름만 보내고 한 턴 뒤 공유를 해제한다`, { timeout: 90_000 }, async t => {
   const claude = provider === "anthropic";
+  const gemini = provider === "gemini";
   const share = `${provider}_root_names`;
   const requests = [];
   const thinking = { type: "thinking", thinking: "fixture", signature: "synthetic-signature" };
   const fake = createServer(async (req, res) => {
-    if (req.url !== (claude ? "/anthropic/v1/messages" : "/openai/v1/chat/completions")) return res.writeHead(404).end();
+    const decisionPath = sharingProviders[provider].endpoint;
+    const streamPath = gemini ? "/gemini/v1beta/models/fixture:streamGenerateContent?alt=sse" : decisionPath;
+    if (req.url !== decisionPath && req.url !== streamPath) return res.writeHead(404).end();
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
     requests.push(body);
-    if (body.tools && body.tool_choice?.type !== "none") {
-      const ask = body.messages.at(-1).content;
+    const offering = gemini ? req.url === decisionPath : body.tools && body.tool_choice?.type !== "none";
+    if (offering) {
+      const ask = gemini ? body.contents.at(-1).parts.at(-1).text : body.messages.at(-1).content;
       if (ask === "폴더 변경 대기" || ask === "요청 중단 대기") await new Promise(resolve => fake.emit("folder-decision", resolve));
+      if (gemini) {
+        const parts = ask === "목록 없이 답해" ? [{ text: "직접 답변" }] : [{
+          thoughtSignature: "c2ln", functionCall: { id: "call_fixture", name: ask === "잘못된 도구" ? "unknown" : "list_entries", args: {} },
+        }];
+        return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+          candidates: [{ finishReason: "STOP", content: { role: "model", parts } }],
+          usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 3, thoughtsTokenCount: 2, totalTokenCount: 35 },
+        }));
+      }
       if (claude) {
         const direct = ask === "목록 없이 답해";
         const tool = { type: "tool_use", id: "call_fixture", name: ask === "잘못된 도구" ? "unknown" : "list_entries", input: {} };
@@ -1831,7 +1849,12 @@ for (const provider of ["openai", "anthropic"]) test(`${provider}에 허용한 �
         }));
       }
     } else {
-      const content = (body.tool_choice?.type === "none" || body.messages.at(-1).role === "tool") ? "자료 목록에 안내.md가 있습니다." : "일반 답변";
+      const usingResult = body.toolConfig?.functionCallingConfig.mode === "NONE" || body.tool_choice?.type === "none" || body.messages?.at(-1).role === "tool";
+      const content = usingResult ? "자료 목록에 안내.md가 있습니다." : "일반 답변";
+      if (gemini) {
+        const event = { candidates: [{ finishReason: "STOP", content: { role: "model", parts: [{ text: content }] } }] };
+        return res.writeHead(200, { "content-type": "text/event-stream" }).end(`data: ${JSON.stringify(event)}\n\n`);
+      }
       if (claude) {
         const events = [{ type: "message_start" }, { type: "content_block_start", content_block: { type: "text", text: content } },
           { type: "message_delta", delta: { stop_reason: "end_turn" } }, { type: "message_stop" }];
@@ -1865,12 +1888,14 @@ for (const provider of ["openai", "anthropic"]) test(`${provider}에 허용한 �
   assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: 100 } })).ok());
   const { scope } = await (await req.get(`${url}/workspace-read`, { headers })).json();
   assert.equal((await req.post(`${url}/chat`, { headers, data: { message: "이전 클라이언트", workspaceScope: scope } })).status(), 409);
-  const wrongShare = claude ? "openai_root_names" : "anthropic_root_names";
-  assert.equal((await req.post(`${url}/chat`, { headers, data: { message: "공급자 불일치", workspaceScope: scope, workspaceShare: wrongShare } })).status(), 409);
+  for (const other of Object.keys(sharingProviders).filter(id => id !== provider)) {
+    assert.equal((await req.post(`${url}/chat`, { headers,
+      data: { message: "공급자 불일치", workspaceScope: scope, workspaceShare: `${other}_root_names` } })).status(), 409);
+  }
   assert.equal(requests.length, 0);
   await page.reload();
   await page.getByRole("navigation", { name: "대화 목록" }).getByRole("button", { name: "새 대화" }).click();
-  const grant = page.getByRole("checkbox", { name: claude ? /Claude\)에 공유 허용/ : /OpenAI에 공유 허용/ });
+  const grant = page.getByRole("checkbox", { name: sharingProviders[provider].label });
   assert.equal(await grant.isChecked(), false);
   await grant.click();
   await page.getByText(root, { exact: false }).waitFor();
@@ -1884,7 +1909,22 @@ for (const provider of ["openai", "anthropic"]) test(`${provider}에 허용한 �
   assert.equal(requests.length, 2);
   const final = requests[1];
   let content;
-  if (claude) {
+  if (gemini) {
+    assert.deepEqual(requests[0].tools[0].functionDeclarations.map(fn => fn.name), ["list_entries"]);
+    assert.equal(requests[0].toolConfig.functionCallingConfig.mode, "AUTO");
+    assert.deepEqual(final.tools, requests[0].tools);
+    assert.equal(final.toolConfig.functionCallingConfig.mode, "NONE");
+    assert.equal(final.generationConfig.maxOutputTokens, 95);
+    assert.deepEqual(final.contents.at(-2), { role: "model", parts: [{
+      thoughtSignature: "c2ln", functionCall: { id: "call_fixture", name: "list_entries", args: {} },
+    }] });
+    const last = final.contents.at(-1);
+    assert.equal(last.role, "user");
+    assert.equal(last.parts.length, 1);
+    assert.equal(last.parts[0].functionResponse.id, "call_fixture");
+    assert.equal(last.parts[0].functionResponse.name, "list_entries");
+    content = JSON.stringify(last.parts[0].functionResponse.response);
+  } else if (claude) {
     assert.deepEqual(requests[0].tools.map(t => t.name), ["list_entries"]);
     assert.deepEqual(requests[0].tool_choice, { type: "auto", disable_parallel_tool_use: true });
     assert.deepEqual(final.tools, requests[0].tools);

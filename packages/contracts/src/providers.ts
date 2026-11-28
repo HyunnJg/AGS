@@ -11,12 +11,17 @@ export const workspaceToolModes: Partial<Record<ProviderId, "local" | "share_roo
   mock: "local",
   openai: "share_root_list",
   anthropic: "share_root_list",
+  gemini: "share_root_list",
 };
-export type FolderProvider = "openai" | "anthropic";
+export const folderShareFlags = {
+  openai: "openai_root_names",
+  anthropic: "anthropic_root_names",
+  gemini: "gemini_root_names",
+} as const;
+export type FolderProvider = keyof typeof folderShareFlags;
 export function isFolderProvider(id: ProviderId | undefined): id is FolderProvider {
-  return id === "openai" || id === "anthropic";
+  return id !== undefined && Object.hasOwn(folderShareFlags, id);
 }
-export const folderShareFlags = { openai: "openai_root_names", anthropic: "anthropic_root_names" } as const;
 export interface ModelSelection {
   provider: ProviderId;
   model: string;

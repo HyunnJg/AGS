@@ -9,7 +9,7 @@ export function isChatRequest(value: unknown): value is ChatRequest {
   return (
     typeof value === "object" &&
     value !== null &&
-    (!("workspaceShare" in value) || ((value.workspaceShare === folderShareFlags.openai || value.workspaceShare === folderShareFlags.anthropic) && "workspaceScope" in value)) &&
+    (!("workspaceShare" in value) || (Object.values(folderShareFlags).some(flag => flag === value.workspaceShare) && "workspaceScope" in value)) &&
     (!("workspaceScope" in value) || (typeof value.workspaceScope === "string" && /^[a-f0-9]{64}$/.test(value.workspaceScope))) &&
     "message" in value &&
     typeof value.message === "string" &&

@@ -205,3 +205,52 @@ test("Gemini의 400 응답은 구조화된 키 오류만 인증 오류로 분류
     await assert.rejects(adapters.models("gemini"), expected);
   }
 });
+
+test("Gemini 목록 공유는 완결된 단일 호출만 사용하고 사고·추가 도구를 답변에서 제외한다", async () => {
+  const fn = { name: "list_entries" };
+  const call = { functionCall: fn, thoughtSignature: "c2ln" };
+  let parts: object[] = [call];
+  let finishReason = "STOP";
+  let usageMetadata: object = {};
+  let blocked = false;
+  const api = configureProviders(env, async (url, init) => {
+    assert.equal(new Headers(init?.headers).get("x-goog-api-key"), env.AGS_GEMINI_API_KEY);
+    if (String(url).endsWith(":generateContent"))
+      return Response.json({ candidates: [{ finishReason, content: { role: "model", parts } }], usageMetadata,
+        ...(blocked && { promptFeedback: { blockReason: "SAFETY" } }) });
+    return new Response(frame({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "숨길 답" }, call] } }] }),
+      { headers: { "content-type": "text/event-stream" } });
+  });
+  const signal = new AbortController().signal;
+  const decide = () => api.folderDecision(target, [], signal, () => {}, 100);
+  for (const invalid of [[call, call], [{ functionCall: { ...fn, args: { path: "x" } } }],
+    [{ functionCall: { ...fn, args: [] } }], [{ functionCall: { ...fn, args: null } }],
+    [{ functionCall: { ...fn, id: "" } }], [{ functionCall: { ...fn, willContinue: true } }],
+    [{ ...call, executableCode: {} }], [{ thought: true, text: "사고" }]]) {
+    parts = invalid;
+    await assert.rejects(decide(), /provider_failed/);
+  }
+  parts = [call];
+  blocked = true;
+  await assert.rejects(decide(), /provider_failed/);
+  blocked = false;
+  finishReason = "MAX_TOKENS";
+  await assert.rejects(decide(), /provider_failed/);
+  parts = [{ text: "사고", thought: true }, { text: "답" }];
+  assert.deepEqual(await decide(), { answer: "답" });
+  finishReason = "STOP";
+  parts = [call];
+  for (const [usage, expected] of [[{}, null], [{ candidatesTokenCount: 3 }, 3],
+    [{ candidatesTokenCount: 3, thoughtsTokenCount: -1 }, null],
+    [{ candidatesTokenCount: 3, thoughtsTokenCount: 2 }, 5]] as const) {
+    usageMetadata = usage;
+    const decision = await decide();
+    assert.ok("followup" in decision);
+    assert.equal(decision.used, expected);
+    const extra = decision.followup("{}");
+    assert.deepEqual(extra, { provider: "gemini", contents: [
+      { role: "model", parts: [call] }, { role: "user", parts: [{ functionResponse: { name: "list_entries", response: {} } }] },
+    ] });
+    await assert.rejects(api.stream(target, [], signal, undefined, 95, undefined, extra).next(), /provider_failed/);
+  }
+});

@@ -1,6 +1,7 @@
 import type { FolderProvider } from "../../contracts/src/providers.ts";
 import { anthropicPayload, defaultClaudeOutput, recordClaudeUsage } from "./anthropic.ts";
 import type { Message } from "../../contracts/src/context.ts";
+import { geminiDecision, geminiPayload } from "./gemini.ts";
 import type { CallCapture } from "./capture.ts";
 import { ProviderError, responseError } from "./errors.ts";
 
@@ -18,19 +19,25 @@ const claudeTools = [{ name: "list_entries", description,
   input_schema: { type: "object", properties: {}, additionalProperties: false } }];
 const claudeOffer = { tools: claudeTools, tool_choice: { type: "auto", disable_parallel_tool_use: true } };
 export const claudeFolderFinal = { tools: claudeTools, tool_choice: { type: "none" } };
+const geminiTools = [{ functionDeclarations: [{ name: "list_entries", description }] }];
+const geminiOffer = { tools: geminiTools, toolConfig: { functionCallingConfig: { mode: "AUTO" } } };
+export const geminiFolderFinal = { tools: geminiTools, toolConfig: { functionCallingConfig: { mode: "NONE" } } };
+const offers = { openai: openAiOffer, anthropic: claudeOffer, gemini: geminiOffer };
 export function folderOfferCost(provider: FolderProvider) {
-  return 8 + Buffer.byteLength(JSON.stringify(provider === "openai" ? openAiOffer : claudeOffer));
+  return 8 + Buffer.byteLength(JSON.stringify(offers[provider]));
 }
 
-export interface FolderFollowup {
-  provider: FolderProvider;
-  messages: { role: string; content: string | null | object[]; tool_calls?: object[]; tool_call_id?: string }[];
-}
+export type FolderFollowup =
+  | { provider: "openai" | "anthropic";
+      messages: { role: string; content: string | null | object[]; tool_calls?: object[]; tool_call_id?: string }[] }
+  | { provider: "gemini"; contents: { role: "model" | "user"; parts: object[] }[] };
 export function folderFollowupCost(followup: FolderFollowup) {
-  const definition = followup.provider === "anthropic" ? 8 + Buffer.byteLength(JSON.stringify(claudeFolderFinal)) : 0;
-  return 16 + Buffer.byteLength(JSON.stringify(followup.messages)) + definition;
+  const definition = followup.provider === "gemini" ? geminiFolderFinal
+    : followup.provider === "anthropic" ? claudeFolderFinal : null;
+  const turns = followup.provider === "gemini" ? followup.contents : followup.messages;
+  return 16 + Buffer.byteLength(JSON.stringify(turns)) + (definition ? 8 + Buffer.byteLength(JSON.stringify(definition)) : 0);
 }
-type Decision = { answer: string } | { followup: (result: string) => FolderFollowup; used: number | null };
+export type Decision = { answer: string } | { followup: (result: string) => FolderFollowup; used: number | null };
 
 async function responseJson(response: Response, onActivity: () => void, capture?: CallCapture) {
   const reader = response.body?.getReader();
@@ -120,9 +127,14 @@ function claudeDecision(body: ReturnType<typeof JSON.parse>, capture?: CallCaptu
 export async function requestFolderDecision(provider: FolderProvider, send: typeof fetch, url: string,
   headers: Record<string, string>, model: string, messages: Message[], signal: AbortSignal, onActivity: () => void,
   maxTokens: number | null, capture?: CallCapture): Promise<Decision> {
-  const payload = provider === "anthropic"
-    ? { ...anthropicPayload(model, messages, maxTokens ?? defaultClaudeOutput), stream: false, ...claudeOffer }
-    : { model, messages, ...openAiOffer, ...(maxTokens !== null && { max_completion_tokens: maxTokens }) };
+  let payload: Record<string, unknown>;
+  if (provider === "anthropic") {
+    maxTokens ??= defaultClaudeOutput;
+    payload = { ...anthropicPayload(model, messages, maxTokens), stream: false, ...claudeOffer };
+  } else if (provider === "gemini")
+    payload = { ...geminiPayload(messages, maxTokens), ...geminiOffer };
+  else
+    payload = { model, messages, ...openAiOffer, ...(maxTokens !== null && { max_completion_tokens: maxTokens }) };
   capture?.recordRequest(messages, maxTokens);
   try {
     const response = await send(url, {
@@ -132,7 +144,7 @@ export async function requestFolderDecision(provider: FolderProvider, send: type
     capture?.response(response);
     if (!response.ok) throw await responseError(provider, response, capture);
     const body = await responseJson(response, onActivity, capture);
-    return provider === "anthropic" ? claudeDecision(body, capture) : openAiDecision(body, capture);
+    return { openai: openAiDecision, anthropic: claudeDecision, gemini: geminiDecision }[provider](body, capture);
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof ProviderError) throw error;

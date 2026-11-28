@@ -123,6 +123,12 @@ Claude 대화는 해당 대화에서 받은 `workspaceScope`와 `workspaceShare:
 
 첫 Messages 요청은 인자 없는 `list_entries`를 제시하고 `tool_choice: {type: "auto", disable_parallel_tool_use: true}`를 사용한다. 직접 답하면 종료하고, 단일 유효한 `tool_use`를 받으면 이전 assistant 블록(서명된 사고 블록 포함)을 보존하고 user의 첫 블록에 같은 ID의 `tool_result`를 넣는다. 2차 요청은 도구 목록을 유지하고 `tool_choice: {type: "none"}`으로 스트리밍한다. 도구 정의·결과 메시지의 비용을 입력 한도에 반영하고, 첫 호출의 `usage.output_tokens`만큼 출력 한도를 차감한다.
 
+### Google Gemini 직접 연결의 최상위 목록 공유
+
+Gemini 대화에서 받은 `workspaceScope`와 `workspaceShare: "gemini_root_names"`를 함께 보낸다. 첫 `generateContent` 호출에서 모델이 직접 답하면 종료한다. 인자 없는 `list_entries` 하나를 요청하면 모델의 원래 파트와 사고 서명을 보존하고 다음 user 파트에 `functionResponse`로 최상위 목록을 넣는다. 호출 ID가 있으면 같은 ID를 돌려준다.
+
+후속 `streamGenerateContent`는 함수 호출 모드를 `NONE`으로 설정한다. 설정한 출력 한도에서 첫 호출의 후보 토큰과 사고 토큰을 차감하며, 사용량을 확인할 수 없거나 남은 한도가 없으면 후속 호출을 중단한다. 각 HTTP 응답은 별도로 기록한다. 공유 범위·이력 격리와 조회 제한은 다른 직접 연결과 같다.
+
 ### 섹션 현재 상태
 
 프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.
