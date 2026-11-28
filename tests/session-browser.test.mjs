@@ -202,6 +202,12 @@ test(
     const base = await start(0);
     const context = await browser.newContext();
     const page = await context.newPage();
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+    async function checkCopy(article, expected) {
+      await article.getByRole("button", {name:"답변 복사", exact:true}).click();
+      await article.getByText("복사했습니다.", {exact:true}).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected);
+    }
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
     await page.goto(base);
@@ -298,6 +304,7 @@ test(
     await page.getByText("중단됨", { exact: true }).waitFor();
     const partial = await page.locator(".reply").innerText();
     assert.ok(partial.length > 0 && partial.length < long.length);
+    await checkCopy(page.locator(".conversation:visible article").last(), partial);
     assert.equal(await composer.inputValue(), "");
     const editQuestion = page.getByRole("button", { name: "질문 다시 편집", exact: true });
     const appendQuestion = page.getByRole("button", { name: "초안 끝에 질문 추가", exact: true });
@@ -595,7 +602,17 @@ test(
     const original = "[mock · coding] 수신한 메시지: 첫 작업";
     const displayed = "[mock · coding] 새 메시지: 첫 작업";
     await page.getByText(displayed, { exact: true }).waitFor();
+    const copyTurn = page.getByRole("article").filter({has: page.locator(".user-message").filter({hasText:/^첫 작업$/})});
+    // Clipboard permission can be denied after the browser has rendered the reply.
+    await page.evaluate(() => Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true, value: async () => { throw new DOMException("Denied", "NotAllowedError"); },
+    }));
+    await copyTurn.getByRole("button", {name:"답변 복사", exact:true}).click();
+    await copyTurn.getByText(/클립보드에 복사할 수 없습니다/).waitFor();
+    await page.evaluate(() => Reflect.deleteProperty(navigator.clipboard, "writeText"));
+    await checkCopy(copyTurn, displayed);
     await page.getByRole("button", { name: "원문 보기" }).click();
+    await checkCopy(copyTurn, original);
     await page.getByText(original, { exact: true }).waitFor();
     await page.getByRole("button", { name: "치환 결과 보기" }).click();
     await page.getByText(displayed, { exact: true }).waitFor();
@@ -1496,6 +1513,7 @@ test(
     await page.getByRole("button", {name:"전송"}).click();
     const interruptedTurn = page.getByRole("article").filter({hasText:interruptedQuestion});
     await interruptedTurn.getByText("응답 중", {exact:true}).waitFor();
+    assert.equal(await interruptedTurn.getByRole("button", {name:"답변 복사"}).count(), 0);
     assert.equal((await page.request.put(`${sessionUrl}/archive`, {headers, data:{archived:true}})).status(), 409);
     assert.equal(await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).count(), 0);
     await stop("SIGKILL");
