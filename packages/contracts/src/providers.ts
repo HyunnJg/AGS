@@ -10,7 +10,13 @@ export type ProviderId = keyof typeof providerNames;
 export const workspaceToolModes: Partial<Record<ProviderId, "local" | "share_root_list">> = {
   mock: "local",
   openai: "share_root_list",
+  anthropic: "share_root_list",
 };
+export type FolderProvider = "openai" | "anthropic";
+export function isFolderProvider(id: ProviderId | undefined): id is FolderProvider {
+  return id === "openai" || id === "anthropic";
+}
+export const folderShareFlags = { openai: "openai_root_names", anthropic: "anthropic_root_names" } as const;
 export interface ModelSelection {
   provider: ProviderId;
   model: string;

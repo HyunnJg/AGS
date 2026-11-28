@@ -117,6 +117,12 @@ mock에서 메시지 `폴더 목록`은 루트를, `폴더 목록 “자료/전�
 
 첫 Chat Completions 요청에는 인자가 없는 `list_entries`만 제공한다. 직접 답변은 그대로 표시한다. 같은 이름의 함수 1개와 빈 객체 인자가 확인되면 최상위 목록을 조회한다. 기존 mock과 같은 탐색 범위와 반환 한도를 적용하며 도구 결과에는 항목 이름·폴더 여부와 제한 표시만 포함한다. 두 번째 요청은 첫 함수 호출 ID와 연결한 `tool` 메시지로 결과를 전달하며 도구 없이 스트리밍한다. 각 HTTP 요청은 독립된 호출 로그가 된다. 입력 한도에는 도구 정의 또는 후속 메시지 비용을 합산하며 설정된 출력 한도는 첫 응답의 공급자 보고 사용량만큼 차감한다. 후속 요청의 예산이 부족하면 `workspace_tool_budget`으로 종료한다. 두 요청은 하나의 취소 신호와 전체 마감 시간을 공유한다. 이후의 자동 대화 이력·구간 요약에는 폴더를 조회했던 턴의 답변 대신 조회 안내문이 들어간다.
 
+### Anthropic (Claude) 직접 연결의 최상위 목록 공유
+
+Claude 대화는 해당 대화에서 받은 `workspaceScope`와 `workspaceShare: "anthropic_root_names"`를 함께 보낸다. 동의는 해당 공급자·모델·섹션·연결 리비전·폴더에 묶인다. 최상위 이름의 필터와 한도, 취소·예산·로그·후속 이력 처리는 OpenAI 경로와 같다.
+
+첫 Messages 요청은 인자 없는 `list_entries`를 제시하고 `tool_choice: {type: "auto", disable_parallel_tool_use: true}`를 사용한다. 직접 답하면 종료하고, 단일 유효한 `tool_use`를 받으면 이전 assistant 블록(서명된 사고 블록 포함)을 보존하고 user의 첫 블록에 같은 ID의 `tool_result`를 넣는다. 2차 요청은 도구 목록을 유지하고 `tool_choice: {type: "none"}`으로 스트리밍한다. 도구 정의·결과 메시지의 비용을 입력 한도에 반영하고, 첫 호출의 `usage.output_tokens`만큼 출력 한도를 차감한다.
+
 ### 섹션 현재 상태
 
 프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.

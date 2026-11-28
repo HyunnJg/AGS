@@ -1,4 +1,4 @@
-import { type folderMessages, requestFolderDecision } from "./openai-folder.ts";
+import { claudeFolderFinal, type FolderFollowup, requestFolderDecision } from "./folder-tools.ts";
 import type { CallCapture } from "./capture.ts";
 import { anthropicPayload, anthropicReply, defaultClaudeOutput } from "./anthropic.ts";
 import { providerHeaders } from "./headers.ts";
@@ -8,6 +8,7 @@ import { geminiPayload, geminiReply } from "./gemini.ts";
 import { createCatalog } from "./catalog.ts";
 import {
   isModelSelection,
+  isFolderProvider,
   type ModelSelection,
   type ProviderId,
   type ProviderOption,
@@ -129,7 +130,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     onActivity?: () => void,
     outputBudget?: number | null,
     capture?: CallCapture,
-    folderResult?: ReturnType<typeof folderMessages>,
+    folderResult?: FolderFollowup,
   ) {
     const { url, key } = endpoint(selection.provider);
     protect(capture);
@@ -137,14 +138,15 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     try {
       const { provider, model } = selection;
       if (!isModelSelection(selection)) throw new ProviderError("provider_failed");
-      if (folderResult && provider !== "openai") throw new ProviderError("provider_failed");
+      if (folderResult && provider !== folderResult.provider) throw new ProviderError("provider_failed");
       let path = "chat/completions";
       let payload: Record<string, unknown>;
       let reply = compatibleReply;
       if (provider === "anthropic") {
         path = "messages";
         outputBudget ??= defaultClaudeOutput;
-        payload = anthropicPayload(model, messages, outputBudget);
+        const initial = anthropicPayload(model, messages, outputBudget);
+        payload = folderResult ? { ...initial, ...claudeFolderFinal, messages: [...initial.messages, ...folderResult.messages] } : initial;
         reply = anthropicReply;
       } else if (provider === "gemini") {
         path = `models/${model}:streamGenerateContent?alt=sse`;
@@ -154,14 +156,14 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         payload = {
           model,
           stream: true,
-          messages: folderResult ? [...messages, ...folderResult] : messages,
+          messages: folderResult ? [...messages, ...folderResult.messages] : messages,
           ...(provider === "openai" && { stream_options: { include_usage: true } }),
           ...(outputBudget != null && {
             [provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
           }),
         };
       }
-      capture?.recordRequest(folderResult ? [...messages, ...folderResult.map(m => ({ content: m.content ?? "" }))] : messages, outputBudget);
+      capture?.recordRequest(folderResult ? [...messages, ...folderResult.messages.map(m => ({ content: Array.isArray(m.content) ? JSON.stringify(m.content) : m.content ?? "" }))] : messages, outputBudget);
       const response = await send(new URL(path, url).href, {
         method: "POST",
         redirect: "error",
@@ -200,10 +202,11 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
   }
   async function folderDecision(selection: ModelSelection, messages: Message[], signal: AbortSignal,
     onActivity: () => void, maxTokens: number | null, capture?: CallCapture) {
-    const { url, key } = endpoint("openai");
-    if (!url || selection.provider !== "openai" || !isModelSelection(selection)) throw new ProviderError("provider_failed");
+    const { provider } = selection;
+    const { url, key } = endpoint(provider);
+    if (!url || !isFolderProvider(provider) || !isModelSelection(selection)) throw new ProviderError("provider_failed");
     protect(capture);
-    return requestFolderDecision(send, new URL("chat/completions", url).href, providerHeaders("openai", key),
+    return requestFolderDecision(provider, send, new URL(provider === "anthropic" ? "messages" : "chat/completions", url).href, providerHeaders(provider, key),
       selection.model, messages, signal, onActivity, maxTokens, capture);
   }
   return { options, stream, folderDecision, protect, ...createCatalog(send, endpoint) };

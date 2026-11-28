@@ -1,14 +1,15 @@
+import { folderShareFlags, type FolderProvider } from "./providers.ts";
 export interface ChatRequest {
   message: string;
   workspaceScope?: string;
-  workspaceShare?: "openai_root_names";
+  workspaceShare?: (typeof folderShareFlags)[FolderProvider];
 }
 
 export function isChatRequest(value: unknown): value is ChatRequest {
   return (
     typeof value === "object" &&
     value !== null &&
-    (!("workspaceShare" in value) || (value.workspaceShare === "openai_root_names" && "workspaceScope" in value)) &&
+    (!("workspaceShare" in value) || ((value.workspaceShare === folderShareFlags.openai || value.workspaceShare === folderShareFlags.anthropic) && "workspaceScope" in value)) &&
     (!("workspaceScope" in value) || (typeof value.workspaceScope === "string" && /^[a-f0-9]{64}$/.test(value.workspaceScope))) &&
     "message" in value &&
     typeof value.message === "string" &&
