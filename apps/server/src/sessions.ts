@@ -18,8 +18,10 @@ import {
 } from "../../../packages/contracts/src/context.ts";
 import { defaultLimits, type ContextLimits } from "../../../packages/contracts/src/context.ts";
 import { randomUUID } from "node:crypto";
+import { setImmediate as yieldToServer } from "node:timers/promises";
 import { DatabaseSync } from "node:sqlite";
 import type { ModelSelection } from "../../../packages/contracts/src/providers.ts";
+import { maxTurnSearchResults, type TurnSearchHit, type TurnSearchResponse } from "../../../packages/contracts/src/sessions.ts";
 import { defaultSessionTitle, isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
 export const sessionSchemaVersion = 9;
@@ -516,6 +518,39 @@ export class SessionStore {
         "SELECT id,message,reply,status,preset,provider,model FROM turns WHERE session_id=? ORDER BY rowid",
       )
       .all(id) as unknown as Turn[];
+  }
+  async searchTurns(query: string, disconnected: () => boolean = () => false): Promise<TurnSearchResponse> {
+    const needle = query.normalize("NFC");
+    const results: TurnSearchHit[] = [];
+    const batch = this.db.prepare(`SELECT turns.rowid AS sequence, turns.id, session_id, message, reply,
+      ${displayedTitle} AS title FROM turns JOIN sessions ON sessions.id=turns.session_id
+      WHERE turns.rowid <= ? ORDER BY turns.rowid DESC LIMIT 32`);
+    const ordinal = this.db.prepare("SELECT COUNT(*) AS n FROM turns WHERE session_id=? AND rowid<=?");
+    let through = Number(this.db.prepare("SELECT MAX(rowid) AS n FROM turns").get()?.n);
+    // End the SQLite statement before yielding so long searches can coexist with streaming writes.
+    while (through > 0 && !disconnected()) {
+      const ceiling = through;
+      through = 0;
+      for (const row of batch.iterate(ceiling)) {
+        through = Number(row.sequence) - 1;
+        for (const field of ["message", "reply"] as const) {
+          const text = String(row[field]).normalize("NFC");
+          const match = text.indexOf(needle);
+          if (match === -1) continue;
+          if (results.length === maxTurnSearchResults) return { results, truncated: true };
+          const start = Math.max(0, match - 48);
+          const end = Math.min(text.length, match + needle.length + 48);
+          const excerpt = text.slice(start, end).replace(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/g, "");
+          results.push({
+            sessionId: String(row.session_id), title: String(row.title), turnId: String(row.id),
+            turnNumber: Number(ordinal.get(String(row.session_id), Number(row.sequence))?.n), field,
+            snippet: (start ? "…" : "") + excerpt + (end < text.length ? "…" : ""),
+          });
+        }
+      }
+      if (through > 0) await yieldToServer();
+    }
+    return { results, truncated: false };
   }
   limits(id: string): ContextLimits {
     return (

@@ -59,6 +59,21 @@ export interface Turn extends ModelSelection {
   preset: Preset;
 }
 
+export const maxTurnSearchQuery = 160;
+export const maxTurnSearchResults = 30;
+export interface TurnSearchHit {
+  sessionId: string;
+  title: string;
+  turnId: string;
+  turnNumber: number;
+  field: "message" | "reply";
+  snippet: string;
+}
+export interface TurnSearchResponse {
+  results: TurnSearchHit[];
+  truncated: boolean;
+}
+
 export const turnStatusLabels = {
   streaming: "응답 중",
   completed: "완료",

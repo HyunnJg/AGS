@@ -5,6 +5,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { SessionStore } from "../apps/server/src/sessions.ts";
 import { localPort } from "../apps/server/src/port.ts";
 import { createChatServer } from "../apps/server/src/server.ts";
 import type { ChatEvent } from "../packages/contracts/src/chat.ts";
@@ -19,9 +20,9 @@ function events(wire: string): ChatEvent[] {
   });
 }
 
-async function fixture(t: TestContext, provider?: Parameters<typeof createChatServer>[1], timeoutMs?: number, totalTimeoutMs = 600_000) {
+async function fixture(t: TestContext, provider?: Parameters<typeof createChatServer>[1], timeoutMs?: number, totalTimeoutMs = 600_000, store?: SessionStore) {
   const token = randomBytes(32).toString("hex");
-  const server = createChatServer(token, provider, timeoutMs, undefined, undefined, {totalTimeoutMs});
+  const server = createChatServer(token, provider, timeoutMs, store, undefined, {totalTimeoutMs});
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address() as AddressInfo;
@@ -199,4 +200,22 @@ test("응답이 계속 오면 유휴 타이머가 연장되고 전체 상한은 
   assert.equal(events(await (await active.chat("계속")).text()).at(-1)?.type,"done");
   const capped=await fixture(t,provider,200,180);
   assert.deepEqual(events(await (await capped.chat("상한")).text()).at(-1),{type:"error",code:"timeout"});
+});
+
+test("본문 검색은 인증된 POST에서 유효한 검색어만 받는다", async t => {
+  const store = new SessionStore(":memory:");
+  t.after(() => store.close());
+  const { base, headers } = await fixture(t, undefined, undefined, undefined, store);
+  const endpoint = `${base}/api/sessions/search`;
+  const search = (query: unknown) => fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ query }) });
+  assert.equal((await fetch(endpoint, { method: "POST" })).status, 401);
+  assert.equal((await fetch(endpoint, { headers })).status, 405);
+  for (const query of ["  ", 12, "x".repeat(161), "\uD800", "a\0b"]) assert.equal((await search(query)).status, 400);
+  const session = store.create();
+  store.begin(session, "t1", "구성한 질문");
+  const result = await search("  질문  ");
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { results: [{
+    sessionId: session.id, title: "구성한 질문", turnId: "t1", turnNumber: 1, field: "message", snippet: "구성한 질문",
+  }], truncated: false });
 });

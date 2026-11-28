@@ -169,3 +169,36 @@ test("기존 파일 첨부를 유지하고 지식 참조 설정을 재시작 후
     store.close();
   }
 });
+
+test("대화 본문 검색은 한글·기호를 문자 그대로 찾고 턴 위치와 제한된 문맥을 반환한다", async t => {
+  const db = new SessionStore(":memory:");
+  t.after(() => db.close());
+  const a = db.create(), b = db.create();
+  const term = "한글 '%_";
+  db.begin(a, "a1", "관련 없는 첫 질문");
+  db.finish("a1", "completed");
+  db.begin(b, "b1", term.normalize("NFD"));
+  db.finish("b1", "completed");
+  db.begin(a, "a2", `${"📝".repeat(40)}x${term}${"뒤".repeat(60)}`);
+  db.append("a2", `부분 답변 ${term}`);
+  db.finish("a2", "cancelled");
+  for (let i = 0; i < 34; i++) {
+    db.begin(b, `other-${i}`, "빈도");
+    db.finish(`other-${i}`, "completed");
+  }
+  const { results, truncated } = await db.searchTurns(term.normalize("NFD"));
+  assert.equal(truncated, false);
+  assert.deepEqual(results.map(h => [h.sessionId, h.turnId, h.turnNumber, h.field]), [
+    [a.id, "a2", 2, "message"], [a.id, "a2", 2, "reply"], [b.id, "b1", 1, "message"],
+  ]);
+  assert.equal(results[0]?.title, "관련 없는 첫 질문");
+  const snippet = results[0]?.snippet;
+  assert.ok(snippet?.startsWith("…") && snippet.endsWith("…") && snippet.isWellFormed() && snippet.includes(term));
+  assert.equal(results[1]?.snippet, `부분 답변 ${term}`);
+  assert.equal(results[2]?.snippet, term);
+  assert.deepEqual(await db.searchTurns("%X"), { results: [], truncated: false });
+  const common = await db.searchTurns("빈도");
+  assert.equal(common.truncated, true);
+  assert.equal(common.results.length, 30);
+  assert.equal(common.results.at(-1)?.turnId, "other-4");
+});

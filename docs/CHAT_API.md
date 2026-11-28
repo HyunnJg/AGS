@@ -32,10 +32,13 @@
 |---|---|
 | GET /api/sessions | 최신 생성순 세션 목록 |
 | POST /api/sessions | 일반 프리셋의 빈 세션 생성 (201) |
+| POST /api/sessions/search | `{query}`로 저장된 질문·답변을 검색한다. `{results,truncated}`를 반환한다. |
 | GET /api/sessions/{id} | 세션 설정과 시간순 턴 기록 |
 | PATCH /api/sessions/{id} | JSON의 preset 값 변경. 다음 턴부터 적용 |
 | PUT /api/sessions/{id}/title | 이전 이름과 새 이름을 받아 대화 이름 변경 |
 | POST /api/sessions/{id}/chat | 기존 채팅 SSE 형식으로 응답하며 DB에 턴 저장. 같은 세션에서 응답 진행 중이면 409 |
+
+본문 검색은 앞뒤 공백을 제거하고 NFC로 정규화한 문구를 대소문자까지 일치하는 부분 문자열로 찾는다. 질문과 답변을 각각 검색해 필드마다 첫 일치 주변의 발췌를 한 건씩 반환한다. 각 결과는 `sessionId`, `title`, `turnId`, 1부터 시작하는 `turnNumber`, `field`(`message` 또는 `reply`), `snippet`을 담는다. 최신 턴부터 최대 30건을 반환하며 더 있으면 `truncated`가 true다.
 
 `PUT /api/sessions/{id}/title`에 `{previous,title}`을 보내면 저장한 `{title}`을 돌려준다. 새 이름은 앞뒤 공백을 제외한 한 줄(최대 80 UTF-16 코드 단위)이다. 현재 이름이 이미 목표와 같으면 재시도도 성공하며, 다른 이름으로 변경됐다면 HTTP 409와 최신 이름을 반환한다. 첫 메시지 전에 직접 저장한 이름은 첫 전송 뒤에도 유지된다.
 
