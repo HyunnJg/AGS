@@ -1,3 +1,4 @@
+import type { WorkspaceRead } from "./workspace.ts";
 import type { ModelSelection } from "./providers.ts";
 
 export const presets = { general: "일반", coding: "코딩", research: "조사", writing: "글쓰기" } as const;
@@ -54,6 +55,7 @@ export interface Session extends ModelSelection {
 }
 
 export interface Turn extends ModelSelection {
+  workspaceReads?: WorkspaceRead[];
   id: string;
   message: string;
   reply: string;

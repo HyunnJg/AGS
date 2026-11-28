@@ -1,3 +1,5 @@
+import { CopyText } from "./CopyText.tsx";
+import { WorkspaceReadDetails } from "./WorkspaceReadDetails.tsx";
 import { DeleteConversation } from "./DeleteConversation.tsx";
 import { ConversationSearch } from "./ConversationSearch.tsx";
 import { ConversationTitle } from "./ConversationTitle.tsx";
@@ -131,6 +133,29 @@ function Conversation({
   const references = useFileReferences(token, session.id);
   const path = `/api/sessions/${session.id}`;
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [readGrant, setReadGrant] = useState<{scope: string; folder: string}>();
+  const [loadingGrant, setLoadingGrant] = useState(false);
+  const grantRequest = useRef<AbortController | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A grant must expire when the session changes scope.
+  useEffect(() => {
+    setReadGrant(undefined);
+    setLoadingGrant(false);
+    return () => grantRequest.current?.abort();
+  }, [session.id, session.sectionRevision, session.provider, session.model]);
+  async function toggleRead() {
+    if (readGrant) return setReadGrant(undefined);
+    const request = new AbortController();
+    grantRequest.current = request;
+    setLoadingGrant(true);
+    try {
+      const grant = await (await api(token, `${path}/workspace-read`, "GET", undefined, request.signal)).json();
+      if (!request.signal.aborted) setReadGrant(grant);
+    } catch (e) {
+      if (!request.signal.aborted) setError(problem(e));
+    } finally {
+      if (!request.signal.aborted) setLoadingGrant(false);
+    }
+  }
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
@@ -214,7 +239,7 @@ function Conversation({
   async function send(e: FormEvent) {
     e.preventDefault();
     const message = text.trim();
-    if (!message || savingPreset || sending.current || remoteStreaming || !ready || !providerEnabled) return;
+    if (!message || loadingGrant || savingPreset || sending.current || remoteStreaming || !ready || !providerEnabled) return;
     const submittedVersion = draftVersion.current;
     sending.current = true;
     setBusy(true);
@@ -222,7 +247,9 @@ function Conversation({
     setError("");
     let accepted = false;
     try {
-      const r = await api(token, `${path}/chat`, "POST", { message });
+      const workspaceScope = session.sectionId && session.provider === "mock" ? readGrant?.scope : undefined;
+      setReadGrant(undefined);
+      const r = await api(token, `${path}/chat`, "POST", { message, workspaceScope });
       accepted = true;
       const usage = r.headers.get("x-ags-memory-use");
       const label = usage ? memoryUseLabel(JSON.parse(usage)) : "";
@@ -239,6 +266,7 @@ function Conversation({
           id,
           message,
           reply: "",
+          ...(workspaceScope && { workspaceReads: [] }),
           status: "streaming",
           preset: session.preset,
           provider: session.provider,
@@ -248,6 +276,7 @@ function Conversation({
       for await (const event of chatEvents(r)) {
         if (event.type === "error") {
           const errors = {
+            workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 작업 활동과 원본 파일을 확인하세요.",
             storage_failed: "대화 기록을 저장하지 못했습니다. 저장 공간을 확인하세요.",
             provider_auth: "공급자 API 키와 접근 권한을 확인하세요.",
             provider_limit: "공급자 요청 한도에 도달했습니다.",
@@ -369,7 +398,11 @@ function Conversation({
                   {providerNames[t.provider]} {t.model}
                 </small>
               </div>
-              <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />
+              {t.workspaceReads ? <>
+                <div className="reply">{t.reply}</div>
+                {t.reply && t.status !== "streaming" && <CopyText label="답변 복사" text={t.reply} />}
+                <WorkspaceReadDetails reads={t.workspaceReads} />
+              </> : <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />}
               {t.status !== "completed" && (
                 <div className="turn-status">
                   <small className="status">{turnStatusLabels[t.status]}</small>
@@ -393,6 +426,12 @@ function Conversation({
         {session.sectionId && <CheckpointEditor key={session.sectionRevision} token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} references={references} />
+        {session.sectionId && session.provider === "mock" && <div>
+          <label className="match-case"><input type="checkbox" checked={!!readGrant}
+            disabled={!ready || busy || remoteStreaming || loadingGrant || savingPreset}
+            onChange={() => void toggleRead()} />이번 요청에서 작업 폴더 읽기 허용</label>
+          {readGrant && <small>{readGrant.folder} · .md와 .txt에서 큰따옴표 안의 문구를 찾습니다.</small>}
+        </div>}
         <form onSubmit={send}>
           <textarea
             ref={composerInput}

@@ -159,6 +159,7 @@ async function restoreInto(file: string, stage: string) {
         if (value === 5) remaining.set("shared_prompt", ["id", "prompt"]);
         if (value === 7) remaining.set("custom_presets", ["id", "name", "instructions"]);
         if (value < 10) remaining.delete("archived_sessions");
+        if (value < 12) remaining.delete("turn_workspace_reads");
         legacySections = value < 11;
         if (legacySections) {
           remaining.set("sessions", ["id", "title", "preset", "provider", "model", "sectionId"]);

@@ -1,3 +1,4 @@
+import { WorkspaceReadDetails } from "./WorkspaceReadDetails.tsx";
 import { downloadBlob } from "./download.ts";
 import { useEffect, useId, useState } from "react";
 import { callKinds, usageLabels, type CallLog, type CallSummary } from "../../../packages/contracts/src/calls.ts";
@@ -107,6 +108,7 @@ function CallDetail({ token, id, sessionTitle }: { token: string; id: string; se
           {log.usage && log.status !== "completed" && <small>호출이 끝나기 전까지 받은 수치입니다.</small>}
         </>
       )}
+      {log.workspaceReads && <WorkspaceReadDetails reads={log.workspaceReads} />}
       <h4>응답 헤더</h4>
       <pre>{log.httpStatus ? JSON.stringify(log.headers, null, 2) : noHttp}</pre>
       <h4>응답 본문</h4>

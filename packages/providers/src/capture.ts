@@ -23,6 +23,11 @@ export class CallCapture {
   private http: number | null = null;
   private headers: Record<string, string> = {};
   private done = false;
+  private workspaceReads: NonNullable<CallLog["workspaceReads"]> = [];
+  workspaceRead(read: NonNullable<CallLog["workspaceReads"]>[number]) {
+    this.workspaceReads.push(read.tool === "search_workspace"
+      ? { ...read, query: this.clean(read.query) } : { ...read, path: this.clean(read.path) });
+  }
   constructor(
     kind: CallKind,
     selection: ModelSelection,
@@ -98,6 +103,7 @@ export class CallCapture {
       const sensitiveAnswer = [...this.secrets].some((s) => this.text.includes(s));
       this.save({
         ...this.meta,
+        ...(this.workspaceReads.length && { workspaceReads: this.workspaceReads }),
         model: this.clean(this.meta.model),
         id: randomUUID(),
         started: this.started,

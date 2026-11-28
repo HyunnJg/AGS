@@ -2,7 +2,7 @@ import { CallCapture } from "../../../packages/providers/src/capture.ts";
 import type { CallKind, CallLog, CallSummary } from "../../../packages/contracts/src/calls.ts";
 import type { Review, ReviewHistoryItem } from "../../../packages/contracts/src/reviews.ts";
 import { maxReferences, type FileReference } from "../../../packages/contracts/src/workspace.ts";
-import type { FileActivity, FileAction } from "../../../packages/contracts/src/workspace.ts";
+import type { FileActivity, FileAction, WorkspaceRead } from "../../../packages/contracts/src/workspace.ts";
 import type { Section, WorkspaceCatalog } from "../../../packages/contracts/src/workspace.ts";
 import { WorkspaceError, type RegisteredRoot } from "./workspace-files.ts";
 import type { DisplaySettings, DisplayRule } from "../../../packages/contracts/src/display.ts";
@@ -24,7 +24,7 @@ import type { ModelSelection } from "../../../packages/contracts/src/providers.t
 import { maxTurnSearchResults, type TurnSearchHit, type TurnSearchResponse } from "../../../packages/contracts/src/sessions.ts";
 import { defaultSessionTitle, isBuiltinPreset, normalizePresetText, type CustomPresetSummary, type CustomPreset, type CustomPresetId, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
 
-export const sessionSchemaVersion = 11;
+export const sessionSchemaVersion = 12;
 
 // Before v9, an untouched session stored its placeholder as a real title.
 export function migrateUntitledSessions(db: DatabaseSync) {
@@ -36,6 +36,10 @@ export function migrateCheckpointSections(db: DatabaseSync) {
   db.exec("UPDATE checkpoints SET sectionId=(SELECT sectionId FROM sessions WHERE id=checkpoints.session)");
 }
 
+// A local tool preview may contain arbitrary document text. Keep it local when a later
+// chat or checkpoint uses an external provider; the user can explicitly attach the source.
+const historyReply = `CASE WHEN EXISTS(SELECT 1 FROM turn_workspace_reads r WHERE r.turn=turns.id)
+  THEN '로컬 작업 폴더 조회 결과는 대화 화면에 보관했습니다.' ELSE reply END`;
 const displayedTitle = `COALESCE(NULLIF(sessions.title,''),'${defaultSessionTitle}')`;
 const sessionQuery = `SELECT sessions.id,${displayedTitle} AS title,preset,provider,model,sectionId,sectionRevision, projects.name || ' / ' || sections.name AS sectionLabel,
   EXISTS(SELECT 1 FROM archived_sessions WHERE session_id=sessions.id) AS archived
@@ -177,6 +181,11 @@ export class SessionStore {
           END;`);
         migrateCheckpointSections(this.db);
         this.db.exec("PRAGMA user_version=11");
+      }
+      if (this.db.prepare("PRAGMA user_version").get()?.user_version === 11) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS turn_workspace_reads(
+          turn TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, sequence INTEGER NOT NULL, detail TEXT NOT NULL,
+          PRIMARY KEY(turn,sequence)); PRAGMA user_version=12`);
       }
       if (this.db.prepare("PRAGMA user_version").get()?.user_version !== sessionSchemaVersion)
         throw new Error("unsupported_session_schema");
@@ -345,13 +354,13 @@ export class SessionStore {
       blockUsage: budget.blockUsage,
     };
     const capture = new CallCapture(kind, selection, session, (log) => {
-      const { request, usage, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
+      const { workspaceReads, request, usage, headers, body, bodyLimited, answer, answerLimited, ...summary } = log;
       this.db
         .prepare("INSERT INTO call_log VALUES(?,?,?)")
         .run(
           log.id,
           JSON.stringify(summary),
-          JSON.stringify({ request, usage, contextBudget, headers, body, bodyLimited, answer, answerLimited }),
+          JSON.stringify({ workspaceReads, request, usage, contextBudget, headers, body, bodyLimited, answer, answerLimited }),
         );
     });
     this.protectCall?.(capture);
@@ -424,7 +433,7 @@ export class SessionStore {
   }
   checkpointTurns(session: string, limit: number) {
     return this.db
-      .prepare(`SELECT id,substr(message,1,3001) AS message,substr(reply,1,3001) AS reply FROM turns
+      .prepare(`SELECT id,substr(message,1,3001) AS message,substr(${historyReply},1,3001) AS reply FROM turns
       WHERE session_id=? AND status='completed' AND rowid > COALESCE((SELECT MAX(t.rowid) FROM turns t
       JOIN checkpoints c ON c.last=t.id WHERE c.session=? AND c.saved=1),0) ORDER BY rowid LIMIT ?`)
       .all(session, session, limit) as unknown as Pick<Turn, "id" | "message" | "reply">[];
@@ -602,12 +611,35 @@ export class SessionStore {
       throw error;
     }
   }
+  recordToolRead(turn: string, project: string, sequence: number, read: WorkspaceRead) {
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("INSERT INTO turn_workspace_reads VALUES(?,?,?)").run(turn, sequence, JSON.stringify(read));
+      this.recordFileActivity(project, read.tool === "read_file" ? "tool_read" : "tool_search", read.path,
+        read.failed ? "workspace_read_failed" : null, read.tool === "read_file" ? read.start : null,
+        read.tool === "read_file" ? read.end : null);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   turns(id: string) {
-    return this.db
+    const turns = this.db
       .prepare(
         "SELECT id,message,reply,status,preset,provider,model FROM turns WHERE session_id=? ORDER BY rowid",
       )
       .all(id) as unknown as Turn[];
+    const byId = new Map(turns.map(turn => [turn.id, turn]));
+    for (const row of this.db.prepare(`SELECT r.turn,r.detail FROM turns t JOIN turn_workspace_reads r ON r.turn=t.id
+      WHERE t.session_id=? ORDER BY t.rowid,r.sequence`).iterate(id)) {
+      const turn = byId.get(String(row.turn));
+      if (turn) {
+        turn.workspaceReads ??= [];
+        turn.workspaceReads.push(JSON.parse(String(row.detail)));
+      }
+    }
+    return turns;
   }
   async searchTurns(query: string, disconnected: () => boolean = () => false): Promise<TurnSearchResponse> {
     const needle = query.normalize("NFC");
@@ -719,7 +751,7 @@ export class SessionStore {
   }
   history(id: string, count = defaultLimits.turns) {
     const rows = this.db
-      .prepare(`SELECT message,reply FROM turns WHERE session_id=? AND status='completed'
+      .prepare(`SELECT message,${historyReply} AS reply FROM turns WHERE session_id=? AND status='completed'
       ORDER BY rowid DESC LIMIT ?`)
       .all(id, count) as unknown as Pick<Turn, "message" | "reply">[];
     return rows.reverse().flatMap((t) => [

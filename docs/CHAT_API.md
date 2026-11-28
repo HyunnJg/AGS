@@ -103,6 +103,12 @@ SQLite는 WAL과 synchronous=NORMAL을 사용한다. 스트림은 즉시 전송�
 
 검색은 요청당 최대 1,500개 디렉터리 항목, 파일 읽기 시도 200개, 파일 본문 합계 8 MiB, 일치한 줄 50개로 제한한다. 한도 때문에 탐색이 일찍 끝나면 limited가 true다. `.git`, `node_modules`, `dist` 디렉터리와 링크는 탐색에서 제외한다.
 
+### mock 대화의 한 턴 폴더 조회
+
+`GET /api/sessions/{id}/workspace-read`는 현재 mock 대화에 연결된 작업 폴더와 범위 식별자 `{folder,scope}`를 반환한다. 사용자가 폴더를 확인하고 허용한 전송에만 `POST /api/sessions/{id}/chat`의 본문에 `workspaceScope: scope`를 추가한다. 모델·대화 소속·폴더가 일치하지 않으면 409, 사용할 검색어가 유효하지 않으면 400이다.
+
+검색은 숨김 항목을 제외한 Markdown·텍스트 파일에서 첫 일치 위치를 선택하고 같은 파일 버전에서 한 줄을 읽는다. 중단과 시간 제한은 채팅 스트림과 공유한다. 읽기 실패는 `workspace_read_failed` SSE 오류로 종료한다. 세션의 턴과 활성화된 호출 로그 상세에는 선택적 `workspaceReads` 배열에 검색어·성공 여부 또는 상대 경로·줄 범위·버전이 남는다. 프로젝트 활동에서는 `tool_search`와 `tool_read`로 구분한다. 원문은 대화와 활성화된 답변 로그에서 확인할 수 있으며 이후 모델 대화·구간 요약에 들어가는 이전 답변은 로컬 조회 안내문으로 대체한다.
+
 ### 섹션 현재 상태
 
 프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.

@@ -1,3 +1,4 @@
+import type { WorkspaceRead } from "./workspace.ts";
 import type { ContextBudget } from "./context.ts";
 import type { ModelSelection } from "./providers.ts";
 
@@ -33,6 +34,7 @@ export const usageLabels = {
 export type ReportedUsage = Partial<Record<keyof typeof usageLabels, number>>;
 
 export interface CallLog extends CallSummary {
+  workspaceReads?: WorkspaceRead[];
   contextBudget?: ContextBudget;
   request?: { messageCount: number; contentBytes: number; maxTokens: number | null };
   headers: Record<string, string>;

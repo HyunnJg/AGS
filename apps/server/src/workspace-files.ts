@@ -228,6 +228,7 @@ export async function searchWorkspace(
   query: string,
   checkActive: () => void,
   caseSensitive = true,
+  options: { include?: (entry: SearchEntry) => boolean; firstOnly?: boolean } = {},
 ): Promise<WorkspaceSearch> {
   if (scope.split("/").some((part) => excluded.has(part.toLowerCase())))
     throw new WorkspaceError(400, "excluded_folder");
@@ -251,6 +252,7 @@ export async function searchWorkspace(
     result.limited ||= dir.limited;
     for (const entry of dir.entries) {
       checkActive();
+      if (options.include && !options.include(entry)) continue;
       const path = folder ? `${folder}/${entry.name}` : entry.name;
       if (entry.directory) {
         folders.push(path);
@@ -294,6 +296,7 @@ export async function searchWorkspace(
           version,
           excerpt: (from ? "…" : "") + line.slice(from, to) + (to < line.length ? "…" : ""),
         });
+        if (options.firstOnly) break traversal;
       }
     }
     if (!remainingEntries && i + 1 < folders.length) {
