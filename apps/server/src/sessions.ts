@@ -615,7 +615,8 @@ export class SessionStore {
     this.db.exec("BEGIN");
     try {
       this.db.prepare("INSERT INTO turn_workspace_reads VALUES(?,?,?)").run(turn, sequence, JSON.stringify(read));
-      this.recordFileActivity(project, read.tool === "read_file" ? "tool_read" : "tool_search", read.path,
+      const actions = { list_entries: "tool_list", read_file: "tool_read", search_workspace: "tool_search" } as const;
+      this.recordFileActivity(project, actions[read.tool], read.path,
         read.failed ? "workspace_read_failed" : null, read.tool === "read_file" ? read.start : null,
         read.tool === "read_file" ? read.end : null);
       this.db.exec("COMMIT");

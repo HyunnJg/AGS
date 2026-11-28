@@ -430,7 +430,7 @@ function Conversation({
           <label className="match-case"><input type="checkbox" checked={!!readGrant}
             disabled={!ready || busy || remoteStreaming || loadingGrant || savingPreset}
             onChange={() => void toggleRead()} />이번 요청에서 작업 폴더 읽기 허용</label>
-          {readGrant && <small>{readGrant.folder} · .md와 .txt에서 큰따옴표 안의 문구를 찾습니다.</small>}
+          {readGrant && <small>{readGrant.folder} · 문구 검색은 “검색어”, 목록 조회는 폴더 목록 또는 폴더 목록 “자료”를 입력하세요.</small>}
         </div>}
         <form onSubmit={send}>
           <textarea
