@@ -1447,6 +1447,7 @@ test(
     await page.locator('.pin[aria-pressed="true"]').waitFor();
     await page.getByRole("button", {name:"적용",exact:true}).click();
     await page.getByRole("dialog").waitFor({state:"hidden"});
+    const claudeChatSession = await page.evaluate(() => sessionStorage.getItem("ags-session"));
     await page.getByLabel("메시지", {exact:true}).fill("Claude 채팅 확인");
     await page.getByRole("button", {name:"전송"}).click();
     await page.getByText("Claude 채팅 응답",{exact:true}).waitFor();
@@ -1501,6 +1502,42 @@ test(
     await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).click();
     assert.equal(await composer.inputValue(), interruptedQuestion);
     assert.equal((await readTurns()).length, afterSend.length + 1);
+    const chatRecord = await (await page.request.get(`${base}/api/sessions/${claudeChatSession}`, { headers })).json();
+    const chatIndex = chatRecord.turns.findIndex(turn => turn.message === "Claude 채팅 확인");
+    assert.ok(chatIndex >= 0 && claudeChatSession !== claudeReview.reviewer);
+    const chatTurnId = chatRecord.turns[chatIndex].id;
+    const openSearch = page.getByRole("button", { name: "대화 본문 검색", exact: true });
+    const searchDialog = page.getByRole("dialog", { name: "대화 본문 검색" });
+    await openSearch.click();
+    await searchDialog.getByLabel("본문 검색어").fill("Claude 채팅".normalize("NFD"));
+    await searchDialog.getByRole("button", { name: "검색", exact: true }).click();
+    for (const field of ["답변", "질문"]) {
+      const hit = searchDialog.getByRole("button").filter({ hasText: new RegExp(`${chatIndex + 1}턴.*${field}`) });
+      await hit.click();
+      await page.waitForFunction(({ session, id }) =>
+        sessionStorage.getItem("ags-session") === session && document.activeElement?.id === `turn-${id}`,
+        { session: claudeChatSession, id: chatTurnId });
+      const target = page.locator(`#turn-${chatTurnId}`);
+      assert.ok(await target.getByText("Claude 채팅 응답", { exact: true }).isVisible());
+      assert.ok(await target.evaluate(el => {
+        const pane = el.closest(".messages").getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        return rect.top < pane.bottom && rect.bottom > pane.top;
+      }));
+      if (field === "답변") await openSearch.click();
+    }
+    assert.equal(await page.evaluate(id => sessionStorage.getItem(`ags-draft:${id}`), claudeReview.reviewer), interruptedQuestion);
+    // A separate client can create a searchable session after this tab loaded its sidebar.
+    const later = await (await page.request.post(`${base}/api/sessions`, { headers, data: {provider:"mock",model:""} })).json();
+    const literal = "별도 탭 '%_ 결정";
+    assert.ok((await page.request.post(`${base}/api/sessions/${later.id}/chat`, { headers, data:{message:literal} })).ok());
+    await openSearch.click();
+    await searchDialog.getByLabel("본문 검색어").fill(literal);
+    await searchDialog.getByRole("button", { name: "검색", exact: true }).click();
+    await searchDialog.getByRole("button").filter({hasText:/1턴.*질문/}).click();
+    await page.waitForFunction(session => sessionStorage.getItem("ags-session") === session &&
+      document.activeElement?.tagName === "ARTICLE", later.id);
+    assert.equal(await page.locator("article:focus .user-message").innerText(), literal);
     assert.deepEqual(pageErrors, []);
   },
 );

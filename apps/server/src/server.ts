@@ -15,7 +15,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
-import { type Session, validSessionTitle, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
+import { type Session, maxTurnSearchQuery, validSessionTitle, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
 import { isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
@@ -353,6 +353,17 @@ export function createChatServer(
     }
     if ((path === "/api/projects" || path.startsWith("/api/projects/")) && store)
       return workspaceApi(path, req, store, stateDirectory, readBody, json, allow);
+    if (path === "/api/sessions/search" && store) {
+      if (req.method !== "POST") return allow("POST");
+      const body = await readBody(req);
+      const query = body && typeof body === "object" && "query" in body && typeof body.query === "string"
+        ? body.query.trim().normalize("NFC") : "";
+      if (!query || query.length > maxTurnSearchQuery || !query.isWellFormed() || query.includes("\0"))
+        throw new RequestError(400, "invalid_search_query");
+      const matches = await store.searchTurns(query, () => res.destroyed);
+      if (!res.destroyed) return json(matches);
+      return;
+    }
     if (path === "/api/sessions" && store) {
       if (req.method === "GET") return json(store.list());
       if (req.method === "POST") {

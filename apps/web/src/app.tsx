@@ -1,3 +1,4 @@
+import { ConversationSearch } from "./ConversationSearch.tsx";
 import { ConversationTitle } from "./ConversationTitle.tsx";
 import { ReviewEditor } from "./ReviewEditor.tsx";
 import { CheckpointEditor } from "./CheckpointEditor.tsx";
@@ -8,7 +9,7 @@ import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { turnStatusLabels, presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn } from "../../../packages/contracts/src/sessions.ts";
+import { turnStatusLabels, presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn, type TurnSearchHit } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
 import {
   isModelSelection,
@@ -93,6 +94,7 @@ function Conversation({
   text,
   setText,
   draftUnsaved,
+  searchHit,
   visible,
 }: {
   token: string;
@@ -109,6 +111,7 @@ function Conversation({
   text: string;
   setText: (value: string) => void;
   draftUnsaved: boolean;
+  searchHit?: TurnSearchHit;
 }) {
   const choices: ModelSelection[] = [];
   for (const option of options) {
@@ -132,6 +135,7 @@ function Conversation({
   const [pendingId, setPendingId] = useState("");
   const [error, setError] = useState("");
   const end = useRef<HTMLDivElement>(null);
+  const visitedHit = useRef<TurnSearchHit | undefined>(undefined);
   const composerInput = useRef<HTMLTextAreaElement>(null);
   const sending = useRef(false);
   const draftVersion = useRef(0);
@@ -159,6 +163,9 @@ function Conversation({
         if (alive && !sending.current) {
           setTurns(data.turns);
           setReady(true);
+          if (searchHit && !data.turns.some((t: Turn) => t.id === searchHit.turnId)) {
+            setError("검색한 턴을 찾을 수 없습니다. 본문을 다시 검색하세요.");
+          }
         }
       } catch (e) {
         if (alive) setError(problem(e));
@@ -170,10 +177,23 @@ function Conversation({
       alive = false;
       clearInterval(timer);
     };
-  }, [path, token, remoteStreaming]);
+  }, [path, token, remoteStreaming, searchHit]);
   useEffect(() => {
-    if (visible && turns.length) end.current?.scrollIntoView({ block: "nearest" });
-  }, [turns, visible]);
+    if (!visible || !turns.length) return;
+    if (searchHit) {
+      const target = document.getElementById(`turn-${searchHit.turnId}`);
+      if (visitedHit.current !== searchHit) {
+        if (target) {
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: "start" });
+          visitedHit.current = searchHit;
+        }
+        return;
+      }
+      if (target === document.activeElement) return;
+    }
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [turns, visible, searchHit]);
 
   async function changeSettings(value: { preset: Preset } | ModelSelection) {
     setSavingPreset(true);
@@ -314,7 +334,7 @@ function Conversation({
             </div>
           )}
           {turns.map((t) => (
-            <article key={t.id}>
+            <article key={t.id} id={`turn-${t.id}`} tabIndex={-1}>
               <div className="user-message">{t.message}</div>
               <div className="byline">
                 <Mark /> AGS{" "}
@@ -430,6 +450,7 @@ function Workspace({ token }: { token: string }) {
     return terms.every(term => searchable.includes(term));
   }) : sessions;
   const [id, setId] = useState("");
+  const [searchHit, setSearchHit] = useState<TurnSearchHit>();
   const [sessionsReady, setSessionsReady] = useState(false);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState("");
@@ -495,7 +516,8 @@ function Workspace({ token }: { token: string }) {
   const activity = (key: string, active: boolean) =>
     setRunning((prev) => (active ? [...prev, key] : prev.filter((item) => item !== key)));
   const mounted = ready ? sessions.filter((s) => s.id === id || running.includes(s.id)) : [];
-  const select = useCallback((id: string, keepSearch = false) => {
+  const select = useCallback((id: string, keepSearch = false, hit?: TurnSearchHit) => {
+    setSearchHit(hit ? { ...hit } : undefined);
     if (!keepSearch) setSessionQuery("");
     setId(id);
     sessionStorage.setItem("ags-session", id);
@@ -575,6 +597,18 @@ function Workspace({ token }: { token: string }) {
             onChange={e => setSessionQuery(e.target.value)}
           />
         )}
+        {ready && <ConversationSearch token={token} openHit={async (hit, close, signal) => {
+          // Another tab may have created the conversation since this sidebar loaded.
+          if (!sessions.some(s => s.id === hit.sessionId)) {
+            const rows: Session[] = await (await api(token, "/api/sessions", "GET", undefined, signal)).json();
+            const session = rows.find(s => s.id === hit.sessionId);
+            if (signal.aborted) return;
+            if (!session) throw new Error("검색한 대화를 찾을 수 없습니다.");
+            setSessions(prev => prev.some(s => s.id === session.id) ? prev : [session, ...prev]);
+          }
+          close();
+          select(hit.sessionId, false, hit);
+        }} />}
         <nav aria-label="대화 목록">
           {terms.length > 0 && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
           {visibleSessions.map((s) => (
@@ -637,6 +671,7 @@ function Workspace({ token }: { token: string }) {
             token={token}
             session={current}
             activity={activity}
+            searchHit={searchHit?.sessionId === current.id ? searchHit : undefined}
             visible={current.id === id}
             text={drafts[current.id]?.text ?? ""}
             draftUnsaved={drafts[current.id]?.unsaved ?? false}

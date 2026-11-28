@@ -809,3 +809,18 @@ header h2 {
 .call-detail h4, .call-detail p, .call-detail pre { margin: 0; }
 .call-detail button { justify-self: start; }
 .call-detail pre { max-height: 15rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: #f3f6f3; }
+
+.body-search-launcher { padding: .3rem .55rem; margin-bottom: .4rem; font-size: .85rem; text-align: left; }
+.body-search-dialog { width: min(34rem, 94vw); max-height: 85dvh; color: inherit; border: 1px solid #bccabe; border-radius: 12px; }
+.body-search-dialog::backdrop { background: #23342c66; }
+.body-search-dialog h2 { margin: 0 0 .8rem; font-size: 1.15rem; }
+.body-search-dialog form { display: flex; gap: .5rem; margin-bottom: .6rem; }
+.body-search-dialog input { flex: 1; min-width: 0; padding: .45rem; }
+.body-search-dialog output { display: block; margin: .5rem 0; }
+.body-search-dialog ul { padding: 0; list-style: none; max-height: 50dvh; overflow: auto; }
+.body-search-dialog li button { width: 100%; display: grid; gap: .2rem; text-align: left; overflow-wrap: anywhere; border: 0; border-bottom: 1px solid #d6ded4; border-radius: 0; }
+.body-search-dialog li button:hover { background: #edf0e8; }
+.messages article:focus { outline: 2px solid #357359; outline-offset: -2px; border-radius: 8px; }
+@media (max-width: 680px) {
+  .body-search-launcher { grid-row: 4; grid-column: 1 / -1; margin: 0; }
+}
