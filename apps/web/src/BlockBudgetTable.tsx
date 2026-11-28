@@ -16,7 +16,7 @@ export function BlockBudgetTable({ rows }: { rows: BlockUsage[] }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.block}>
-              <th scope="row">{row.block === "system" ? "고정 지침" : blockNames[row.block]}</th>
+              <th scope="row">{row.block === "system" ? "고정 지침" : row.block === "tool" ? "폴더 목록 도구" : blockNames[row.block]}</th>
               <td>{row.estimatedTokens.toLocaleString()}</td>
               <td>{row.includedMessages}</td>
               <td>{row.omittedMessages}</td>

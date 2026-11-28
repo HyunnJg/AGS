@@ -111,6 +111,12 @@ mock에서 메시지 `폴더 목록`은 루트를, `폴더 목록 “자료/전�
 
 검색은 숨김 항목을 제외한 Markdown·텍스트 파일에서 첫 일치 위치를 선택하고 같은 파일 버전에서 한 줄을 읽는다. 중단과 시간 제한은 채팅 스트림과 공유한다. 읽기 실패는 `workspace_read_failed` SSE 오류로 종료한다. 세션의 턴과 활성화된 호출 로그 상세에는 선택적 `workspaceReads` 배열에 검색어·성공 여부 또는 상대 경로·줄 범위·버전이 남는다. 프로젝트 활동에서는 `tool_search`와 `tool_read`로 구분한다. 원문은 대화와 활성화된 답변 로그에서 확인할 수 있으며 이후 모델 대화·구간 요약에 들어가는 이전 답변은 로컬 조회 안내문으로 대체한다.
 
+### OpenAI 직접 연결의 한 턴 최상위 목록 공유
+
+같은 `GET /api/sessions/{id}/workspace-read` 응답에 `provider`, `model`, `sectionId`, `sectionRevision`이 포함된다. 클라이언트는 현재 화면과 일치하는지 확인한다. OpenAI로 폴더 이름을 공유하려면 해당 턴의 POST 본문에 `workspaceScope`와 `workspaceShare: "openai_root_names"`가 모두 필요하다. 서버는 모델·소속·등록 폴더·OpenAI 연결 리비전에 범위를 결부한다. 공유 표시와 범위가 일치하지 않으면 409다.
+
+첫 Chat Completions 요청에는 인자가 없는 `list_entries`만 제공한다. 직접 답변은 그대로 표시한다. 같은 이름의 함수 1개와 빈 객체 인자가 확인되면 최상위 목록을 조회한다. 기존 mock과 같은 탐색 범위와 반환 한도를 적용하며 도구 결과에는 항목 이름·폴더 여부와 제한 표시만 포함한다. 두 번째 요청은 첫 함수 호출 ID와 연결한 `tool` 메시지로 결과를 전달하며 도구 없이 스트리밍한다. 각 HTTP 요청은 독립된 호출 로그가 된다. 입력 한도에는 도구 정의 또는 후속 메시지 비용을 합산하며 설정된 출력 한도는 첫 응답의 공급자 보고 사용량만큼 차감한다. 후속 요청의 예산이 부족하면 `workspace_tool_budget`으로 종료한다. 두 요청은 하나의 취소 신호와 전체 마감 시간을 공유한다. 이후의 자동 대화 이력·구간 요약에는 폴더를 조회했던 턴의 답변 대신 조회 안내문이 들어간다.
+
 ### 섹션 현재 상태
 
 프로젝트 목록의 각 섹션에는 `stateKey`, `statePath`, `stateVersion`이 있다. 빈 지정은 null이다. `POST /api/projects/{id}/state-source`에 `{section, root, path, version, previous}`를 보낸다. version은 파일 조회의 SHA-256, previous는 현재 stateKey다. version이 null이면 지정을 해제한다. 프로젝트의 연결 폴더가 바뀌면 지정도 해제된다.

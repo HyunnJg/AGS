@@ -1,3 +1,4 @@
+import { type folderMessages, requestFolderDecision } from "./openai-folder.ts";
 import type { CallCapture } from "./capture.ts";
 import { anthropicPayload, anthropicReply, defaultClaudeOutput } from "./anthropic.ts";
 import { providerHeaders } from "./headers.ts";
@@ -71,20 +72,15 @@ async function* eventData(body: ReadableStream<Uint8Array>, onActivity?: () => v
   }
 }
 
-async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture) {
+async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture, finalFolderRound = false) {
   for await (const data of events) {
     if (data.trim() === "[DONE]") return;
     const chunk = JSON.parse(data);
-    const usage = chunk.usage;
-    if (usage && capture) {
-      capture.recordTokens("inputTokens", usage.prompt_tokens);
-      capture.recordTokens("outputTokens", usage.completion_tokens);
-      capture.recordTokens("totalTokens", usage.total_tokens);
-      capture.recordTokens("cachedInputTokens", usage.prompt_tokens_details?.cached_tokens);
-      capture.recordTokens("cacheWriteTokens", usage.prompt_tokens_details?.cache_write_tokens);
-      capture.recordTokens("reasoningTokens", usage.completion_tokens_details?.reasoning_tokens);
-    }
+    capture?.recordCompatibleUsage(chunk.usage);
     const choice = chunk.choices?.[0];
+    if (finalFolderRound && (choice?.delta?.tool_calls || choice?.delta?.function_call ||
+      choice?.finish_reason === "tool_calls" || choice?.finish_reason === "function_call"))
+      throw new ProviderError("provider_failed");
     if (chunk.error || choice?.finish_reason === "error") throw new ProviderError("provider_failed");
     const content = choice?.delta?.content;
     if (typeof content === "string" && content) yield content;
@@ -133,6 +129,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     onActivity?: () => void,
     outputBudget?: number | null,
     capture?: CallCapture,
+    folderResult?: ReturnType<typeof folderMessages>,
   ) {
     const { url, key } = endpoint(selection.provider);
     protect(capture);
@@ -140,6 +137,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     try {
       const { provider, model } = selection;
       if (!isModelSelection(selection)) throw new ProviderError("provider_failed");
+      if (folderResult && provider !== "openai") throw new ProviderError("provider_failed");
       let path = "chat/completions";
       let payload: Record<string, unknown>;
       let reply = compatibleReply;
@@ -156,14 +154,14 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         payload = {
           model,
           stream: true,
-          messages,
+          messages: folderResult ? [...messages, ...folderResult] : messages,
           ...(provider === "openai" && { stream_options: { include_usage: true } }),
           ...(outputBudget != null && {
             [provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
           }),
         };
       }
-      capture?.recordRequest(messages, outputBudget);
+      capture?.recordRequest(folderResult ? [...messages, ...folderResult.map(m => ({ content: m.content ?? "" }))] : messages, outputBudget);
       const response = await send(new URL(path, url).href, {
         method: "POST",
         redirect: "error",
@@ -184,7 +182,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         throw await responseError(provider, response, capture);
       }
       const events = eventData(response.body, onActivity, capture);
-      yield* reply(events, capture);
+      yield* reply(events, capture, !!folderResult);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof ProviderError) throw error;
@@ -200,5 +198,13 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       env.AGS_ANTHROPIC_API_KEY,
     );
   }
-  return { options, stream, protect, ...createCatalog(send, endpoint) };
+  async function folderDecision(selection: ModelSelection, messages: Message[], signal: AbortSignal,
+    onActivity: () => void, maxTokens: number | null, capture?: CallCapture) {
+    const { url, key } = endpoint("openai");
+    if (!url || selection.provider !== "openai" || !isModelSelection(selection)) throw new ProviderError("provider_failed");
+    protect(capture);
+    return requestFolderDecision(send, new URL("chat/completions", url).href, providerHeaders("openai", key),
+      selection.model, messages, signal, onActivity, maxTokens, capture);
+  }
+  return { options, stream, folderDecision, protect, ...createCatalog(send, endpoint) };
 }

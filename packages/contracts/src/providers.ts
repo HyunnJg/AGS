@@ -7,6 +7,10 @@ export const providerNames = {
   custom: "사용자 지정 API",
 } as const;
 export type ProviderId = keyof typeof providerNames;
+export const workspaceToolModes: Partial<Record<ProviderId, "local" | "share_root_list">> = {
+  mock: "local",
+  openai: "share_root_list",
+};
 export interface ModelSelection {
   provider: ProviderId;
   model: string;

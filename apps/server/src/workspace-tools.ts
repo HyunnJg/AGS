@@ -1,15 +1,16 @@
+import { workspaceToolModes } from "../../../packages/contracts/src/providers.ts";
 import { createHash } from "node:crypto";
 import type { Session } from "../../../packages/contracts/src/sessions.ts";
 import type { WorkspaceRead } from "../../../packages/contracts/src/workspace.ts";
 import type { SessionStore } from "./sessions.ts";
 import { listToolEntries, validToolFolder, visibleToolEntry, searchWorkspace, readLines, WorkspaceError, type RegisteredRoot } from "./workspace-files.ts";
 
-export function workspaceScope(store: SessionStore, session: Session) {
+export function workspaceScope(store: SessionStore, session: Session, connectionRevision?: number) {
   const project = session.sectionId && store.sectionProject(session.sectionId);
   const folder = project && store.project(project);
-  if (session.provider !== "mock" || !project || !folder || !folder.root || !folder.identity) return;
+  if (!workspaceToolModes[session.provider] || !project || !folder || !folder.root || !folder.identity) return;
   const scope = createHash("sha256").update(JSON.stringify([
-    session.id, session.sectionId, session.sectionRevision, session.model, project, folder.root, folder.identity,
+    session.id, session.sectionId, session.sectionRevision, session.provider, session.model, connectionRevision, project, folder.root, folder.identity,
   ])).digest("hex");
   return { scope, project, root: { path: folder.root, identity: folder.identity } };
 }
@@ -31,6 +32,20 @@ export function mockWorkspaceRequest(message: string): MockWorkspaceRequest {
   return { tool: "search_workspace", query: phrase };
 }
 
+export async function workspaceListing(root: RegisteredRoot, path: string, check: () => void,
+  record: (row: WorkspaceRead) => void, maxBytes = 8192) {
+  let page: Awaited<ReturnType<typeof listToolEntries>>;
+  try {
+    page = await listToolEntries(root, path, check, maxBytes);
+    check();
+  } catch (error) {
+    record({ tool: "list_entries", path, failed: true });
+    throw error;
+  }
+  record({ tool: "list_entries", path, count: page.entries.length, limited: page.limited });
+  return page;
+}
+
 // A turn performs one directory listing, or a search followed by one version-pinned read.
 export async function* mockWorkspaceReply(root: RegisteredRoot, request: MockWorkspaceRequest, check: () => void,
   record: (row: WorkspaceRead) => void) {
@@ -41,15 +56,7 @@ export async function* mockWorkspaceReply(root: RegisteredRoot, request: MockWor
     if (remaining < 0) throw new WorkspaceError(413, "tool_result_limit");
   }
   if (request.tool === "list_entries") {
-    let page: Awaited<ReturnType<typeof listToolEntries>>;
-    try {
-      page = await listToolEntries(root, request.path, check, remaining);
-      accept(page);
-    } catch (error) {
-      record({ ...request, failed: true });
-      throw error;
-    }
-    record({ ...request, count: page.entries.length, limited: page.limited });
+    const page = await workspaceListing(root, request.path, check, record, remaining);
     const names = page.entries.map(entry => entry.name + (entry.directory ? "/" : ""));
     const lines = [`폴더 목록 · ${request.path || "작업 폴더"}`, ...names];
     if (!names.length) lines.push("확인한 범위에 표시할 폴더나 문서가 없습니다.");

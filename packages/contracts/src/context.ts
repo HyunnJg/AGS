@@ -82,7 +82,7 @@ export function memoryUseLabel(use: MemoryUse) {
     .join(" · ");
 }
 export interface BlockUsage {
-  block: "system" | Block;
+  block: "system" | "tool" | Block;
   estimatedTokens: number;
   includedMessages: number;
   omittedMessages: number;
