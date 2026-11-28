@@ -115,7 +115,7 @@ textarea:focus-visible {
 .nav-label {
   margin: 0 10px 9px;
 }
-.session-search {
+.session-search, .session-section-filter {
   min-width: 0;
   width: 100%;
   margin-bottom: 6px;
@@ -726,6 +726,7 @@ header h2 {
   .project-launcher { grid-row: 3; grid-column: 1 / -1; margin: 0; padding: 3px 10px; }
   .layout aside:has(.session-search) .project-launcher { grid-column: 2; }
   .session-search { grid-column: 1; grid-row: 3; margin: 0; }
+  .session-section-filter { grid-column: 1 / -1; grid-row: 5; margin: 0; }
   .layout nav:has(.session-match-detail) { max-height: 54px; }
 }
 
