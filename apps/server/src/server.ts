@@ -4,8 +4,8 @@ import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
-import { folderCallBudget, openAiFolderTurn } from "./openai-folder-turn.ts";
-import { folderOfferCost } from "../../../packages/providers/src/openai-folder.ts";
+import { folderCallBudget, providerFolderTurn } from "./folder-turn.ts";
+import { folderOfferCost } from "../../../packages/providers/src/folder-tools.ts";
 import type { WorkspaceRead } from "../../../packages/contracts/src/workspace.ts";
 import { workspaceScope, mockWorkspaceReply, mockWorkspaceRequest } from "./workspace-tools.ts";
 import { workspaceApi } from "./workspace-api.ts";
@@ -20,7 +20,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { encodeEvent, isChatRequest, type ChatEvent } from "../../../packages/contracts/src/chat.ts";
 import { type Session, maxTurnSearchQuery, validSessionTitle, isPreset, isCustomPresetId, isPresetDraft } from "../../../packages/contracts/src/sessions.ts";
-import { isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
+import { isFolderProvider, folderShareFlags, isConnectionId, isModelSelection } from "../../../packages/contracts/src/providers.ts";
 import { configureProviders, ProviderError } from "../../../packages/providers/src/compatible.ts";
 import { streamMock } from "../../../packages/providers/src/mock.ts";
 import type { SessionStore } from "./sessions.ts";
@@ -88,7 +88,7 @@ export function createChatServer(
   const active = new Map<string, AbortController>();
 
   function readScope(db: SessionStore, session: Session) {
-    return workspaceScope(db, session, session.provider === "openai" ? connections?.view("openai").revision : undefined);
+    return workspaceScope(db, session, isFolderProvider(session.provider) ? connections?.view(session.provider).revision : undefined);
   }
   const checkpoints = new CheckpointService();
   function memoryFor(db: SessionStore, section: Session["sectionId"]) {
@@ -638,14 +638,15 @@ export function createChatServer(
     const scope = body.workspaceScope && store && session ? readScope(store, session) : undefined;
     if (body.workspaceScope && (!scope || scope.scope !== body.workspaceScope))
       throw new RequestError(409, "workspace_read_unavailable");
-    const externalList = !!scope && session?.provider === "openai";
-    if (externalList !== (body.workspaceShare === "openai_root_names"))
+    const folderProvider = scope && isFolderProvider(session?.provider) ? session.provider : undefined;
+    const offerCost = folderProvider ? folderOfferCost(folderProvider) : 0;
+    if (body.workspaceShare !== (folderProvider ? folderShareFlags[folderProvider] : undefined))
       throw new RequestError(409, "workspace_read_unavailable");
-    if (externalList && context && context.inputCeiling !== null && context.estimatedInput + folderOfferCost > context.inputCeiling)
+    if (folderProvider && context && context.inputCeiling !== null && context.estimatedInput + offerCost > context.inputCeiling)
       throw new RequestError(422, "workspace_tool_budget");
     const toolRequest = scope && session?.provider === "mock" ? mockWorkspaceRequest(message) : undefined;
     const admittedProviders = providers;
-    const openAiRevision = externalList ? connections?.view("openai").revision : undefined;
+    const connectionRevision = folderProvider ? connections?.view(folderProvider).revision : undefined;
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
     const controller = new AbortController();
@@ -688,7 +689,7 @@ export function createChatServer(
       "chat",
       session ?? { provider: "mock", model: "" },
       session?.id ?? null,
-      session?.provider === "mock" ? undefined : context && externalList ? folderCallBudget(context, folderOfferCost, 0) : context,
+      session?.provider === "mock" ? undefined : context && folderProvider ? folderCallBudget(context, offerCost, 0) : context,
     );
     try {
       res.writeHead(200, {
@@ -705,7 +706,7 @@ export function createChatServer(
         if (!scope || !store) throw new WorkspaceError(409, "workspace_read_unavailable");
         const current = store.project(scope.project);
         if (current?.root !== scope.root.path || current.identity !== scope.root.identity ||
-            (externalList && connections?.view("openai").revision !== openAiRevision))
+            (folderProvider && connections?.view(folderProvider).revision !== connectionRevision))
           throw new WorkspaceError(409, "folder_changed");
       }
       function recordRead(read: WorkspaceRead) {
@@ -718,8 +719,8 @@ export function createChatServer(
         }
         capture?.workspaceRead(read);
       }
-      const reply = externalList && context && session && store && scope
-        ? openAiFolderTurn(admittedProviders, session, context, scope.root, signal, () => timer.refresh(),
+      const reply = folderProvider && context && session && store && scope
+        ? providerFolderTurn(admittedProviders, session, context, scope.root, signal, () => timer.refresh(),
             checkWorkspace, recordRead, capture, extraInput => {
               capture?.finish("completed");
               capture = store.startCall("chat", session, session.id, folderCallBudget(context, extraInput, 2));

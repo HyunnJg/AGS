@@ -1,4 +1,4 @@
-import { folderMessages } from "../../../packages/providers/src/openai-folder.ts";
+import { folderFollowupCost } from "../../../packages/providers/src/folder-tools.ts";
 import type { configureProviders } from "../../../packages/providers/src/compatible.ts";
 import type { CallCapture } from "../../../packages/providers/src/capture.ts";
 import type { ContextBudget, ContextPreview } from "../../../packages/contracts/src/context.ts";
@@ -17,7 +17,7 @@ export function folderCallBudget(context: ContextBudget, extraInput: number, ext
   };
 }
 
-export async function* openAiFolderTurn(providers: ReturnType<typeof configureProviders>, selection: ModelSelection,
+export async function* providerFolderTurn(providers: ReturnType<typeof configureProviders>, selection: ModelSelection,
   context: ContextPreview, root: RegisteredRoot, signal: AbortSignal, activity: () => void,
   check: () => void, record: (row: WorkspaceRead) => void, capture: CallCapture | undefined,
   nextHttpCall: (extraInput: number) => CallCapture | undefined) {
@@ -32,8 +32,8 @@ export async function* openAiFolderTurn(providers: ReturnType<typeof configurePr
   if (remainingOutput !== null && remainingOutput < 1) throw new WorkspaceError(422, "workspace_tool_budget");
   // Count the complete tool messages, including framing and escaped names, before sending.
   const page = await workspaceListing(root, "", check, record);
-  const extra = folderMessages(decision.id, JSON.stringify(page), decision.preface);
-  const extraInput = Buffer.byteLength(JSON.stringify(extra)) + 16;
+  const extra = decision.followup(JSON.stringify(page));
+  const extraInput = folderFollowupCost(extra);
   if (inputCeiling !== null && estimatedInput + extraInput > inputCeiling)
     throw new WorkspaceError(422, "workspace_tool_budget");
   check();

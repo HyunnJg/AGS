@@ -127,3 +127,29 @@ test("Claude 모델 페이지는 이름·다음 커서를 해석하고 완결된
   await assert.rejects(api.models("anthropic", true), /invalid_catalog_cursor/);
   assert.deepEqual(await api.models("anthropic"), models);
 });
+
+test("Claude 폴더 조회는 단일 빈 인자 호출만 수락하고 결과 전송 뒤의 추가 도구를 거부한다", async () => {
+  const call = { type: "tool_use", id: "toolu_fixture", name: "list_entries", input: {} };
+  let content: object[] = [call];
+  const api = configureProviders(env, async (_url, init) => {
+    if (!JSON.parse(String(init?.body)).stream)
+      return Response.json({ type: "message", role: "assistant", content, stop_reason: "tool_use", usage: { output_tokens: 4 } });
+    const events = [complete[0], { type: "content_block_start", content_block: call }, ...complete.slice(2)];
+    return new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+  });
+  const signal = new AbortController().signal;
+  const decide = () => api.folderDecision(target, [{ role: "user", content: "목록" }], signal, () => {}, 100);
+  for (const invalid of [[call, { ...call, id: "second" }], [{ ...call, input: { path: "notes" } }],
+    [{ ...call, input: [] }], [{ ...call, id: "" }], [{ type: "text", text: "호출 누락" }]]) {
+    content = invalid;
+    await assert.rejects(decide(), /provider_failed/);
+  }
+  content = [call];
+  const decision = await decide();
+  assert.ok("followup" in decision);
+  await assert.rejects(async () => {
+    for await (const _ of api.stream(target, [], signal, () => {}, 96, undefined, decision.followup("{}"))) {
+      assert.fail("추가 도구 요청 뒤에 텍스트가 표시됐습니다.");
+    }
+  }, /provider_failed/);
+});

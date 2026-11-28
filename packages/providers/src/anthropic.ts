@@ -14,12 +14,24 @@ export function anthropicPayload(model: string, input: Message[], maxTokens: num
   return { model, system, messages, max_tokens: maxTokens, stream: true };
 }
 
-export async function* anthropicReply(events: AsyncIterable<string>, capture?: CallCapture) {
+export function recordClaudeUsage(capture?: CallCapture, usage?: {
+  input_tokens?: unknown; cache_read_input_tokens?: unknown; cache_creation_input_tokens?: unknown; output_tokens?: unknown;
+}) {
+  if (!capture) return;
+  capture.recordTokens("uncachedInputTokens", usage?.input_tokens);
+  capture.recordTokens("cachedInputTokens", usage?.cache_read_input_tokens);
+  capture.recordTokens("cacheWriteTokens", usage?.cache_creation_input_tokens);
+  capture.recordTokens("outputTokens", usage?.output_tokens);
+}
+
+export async function* anthropicReply(events: AsyncIterable<string>, capture?: CallCapture, finalFolderRound = false) {
   let started = false;
   let hasText = false;
   let reason: string | undefined;
   for await (const data of events) {
     const event = JSON.parse(data);
+    if (finalFolderRound && (event.content_block?.type === "tool_use" || event.content_block?.type === "server_tool_use" ||
+        event.delta?.type === "input_json_delta" || event.delta?.stop_reason === "tool_use")) throw new Error("unexpected_tool_use");
     if (event.type === "error") throw new Error("anthropic_stream_error");
     if (event.type === "message_start") {
       if (started) throw new Error("duplicate_message_start");
@@ -27,10 +39,7 @@ export async function* anthropicReply(events: AsyncIterable<string>, capture?: C
     }
     if (capture && (event.type === "message_start" || event.type === "message_delta")) {
       const usage = event.type === "message_start" ? event.message?.usage : event.usage;
-      capture.recordTokens("uncachedInputTokens", usage?.input_tokens);
-      capture.recordTokens("cachedInputTokens", usage?.cache_read_input_tokens);
-      capture.recordTokens("cacheWriteTokens", usage?.cache_creation_input_tokens);
-      capture.recordTokens("outputTokens", usage?.output_tokens);
+      recordClaudeUsage(capture, usage);
     }
     if (event.type === "message_delta" && event.delta?.stop_reason) reason = event.delta.stop_reason;
     if (event.type === "message_stop") {
