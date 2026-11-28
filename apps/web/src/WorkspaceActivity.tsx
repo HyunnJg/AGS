@@ -3,6 +3,7 @@ import type { FileActivity } from "../../../packages/contracts/src/workspace.ts"
 import { api, fileActivityError } from "./api.ts";
 
 const labels = {
+  tool_list: "대화 도구 · 폴더 목록",
   tool_search: "대화 도구 · 본문 검색",
   tool_read: "대화 도구 · 파일 읽기",
   entries: "폴더 탐색",

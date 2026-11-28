@@ -184,7 +184,7 @@ export async function readLines(
 
 const excluded = new Set([".git", "node_modules", "dist"]);
 type SearchEntry = { name: string; directory: boolean };
-async function searchDirectory(root: RegisteredRoot, path: string, remaining: number) {
+async function searchDirectory(root: RegisteredRoot, path: string, remaining: number, checkActive?: () => void) {
   const node = await locate(root, path);
   if (!node.stat.isDirectory()) throw new WorkspaceError(400, "not_directory");
   const entries: SearchEntry[] = [];
@@ -192,6 +192,7 @@ async function searchDirectory(root: RegisteredRoot, path: string, remaining: nu
   let limited = false;
   const dir = await opendir(node.target);
   for await (const entry of dir) {
+    if (seen % 32 === 0) checkActive?.();
     if (seen === remaining) {
       limited = true;
       break;
@@ -205,6 +206,30 @@ async function searchDirectory(root: RegisteredRoot, path: string, remaining: nu
   entries.sort((a, b) => a.name.localeCompare(b.name, "ko") || (a.name < b.name ? -1 : 1));
   return { entries, seen, limited };
 }
+export function visibleToolEntry({ name, directory }: SearchEntry) {
+  return !name.startsWith(".") && (directory ? !excluded.has(name.toLowerCase()) : /\.(?:md|txt)$/i.test(name));
+}
+export function validToolFolder(path: string) {
+  return path === "" || (path.length <= 512 && path.split("/").every(name =>
+    validPart(name) && visibleToolEntry({ name, directory: true })));
+}
+
+export async function listToolEntries(root: RegisteredRoot, path: string, checkActive: () => void, maxBytes: number) {
+  if (!validToolFolder(path)) throw new WorkspaceError(400, "invalid_tool_folder");
+  checkActive();
+  const page = await searchDirectory(root, path, 1500, checkActive);
+  checkActive();
+  const visible = page.entries.filter(visibleToolEntry);
+  const entries = visible.slice(0, 30);
+  const result = { entries, limited: page.limited || entries.length < visible.length };
+  while (Buffer.byteLength(JSON.stringify(result)) > maxBytes) {
+    if (!entries.length) throw new WorkspaceError(413, "tool_result_limit");
+    entries.pop();
+    result.limited = true;
+  }
+  return result;
+}
+
 function skipSearchEntry(e: unknown) {
   if (e instanceof WorkspaceError)
     return [

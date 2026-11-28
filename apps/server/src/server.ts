@@ -4,7 +4,7 @@ import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
-import { workspaceScope, mockWorkspaceReply, searchPhrase } from "./workspace-tools.ts";
+import { workspaceScope, mockWorkspaceReply, mockWorkspaceRequest } from "./workspace-tools.ts";
 import { workspaceApi } from "./workspace-api.ts";
 import { checkKnowledgeSource } from "./knowledge-source.ts";
 import { WorkspaceError } from "./workspace-files.ts";
@@ -631,7 +631,7 @@ export function createChatServer(
     const scope = body.workspaceScope && store && session ? workspaceScope(store, session) : undefined;
     if (body.workspaceScope && (!scope || scope.scope !== body.workspaceScope))
       throw new RequestError(409, "workspace_read_unavailable");
-    const query = scope && searchPhrase(message);
+    const toolRequest = scope && mockWorkspaceRequest(message);
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
     const controller = new AbortController();
@@ -686,8 +686,8 @@ export function createChatServer(
       });
       res.flushHeaders();
       let sequence = 0;
-      const reply = scope && query && store && session
-        ? mockWorkspaceReply(scope.root, query, () => {
+      const reply = scope && toolRequest && store && session
+        ? mockWorkspaceReply(scope.root, toolRequest, () => {
             signal.throwIfAborted();
             const current = store.project(scope.project);
             if (current?.root !== scope.root.path || current.identity !== scope.root.identity)

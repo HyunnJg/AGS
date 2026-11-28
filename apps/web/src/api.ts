@@ -17,6 +17,7 @@ import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 const workspaceMessages: Record<string, string> = {
   workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 파일 변경 여부와 줄 길이를 확인하세요.",
   workspace_read_unavailable: "현재 mock 대화와 연결 폴더를 확인한 뒤 읽기를 다시 허용하세요.",
+  invalid_tool_folder: "폴더 목록 뒤에 큰따옴표로 감싼 상대 경로를 입력하세요. 숨김·제외 폴더는 조회할 수 없습니다.",
   invalid_tool_query: "찾을 문구를 큰따옴표 안에 1~120자로 입력하세요.",
   source_unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
   knowledge_disabled: "설정 → 토글형 모듈에서 외부 지식 참조를 켜면 지식 발췌를 추가할 수 있습니다.",
