@@ -96,6 +96,21 @@ export async function api(
       window.dispatchEvent(new Event("ags-unauthorized"));
       throw new Error("로컬 인증 토큰을 확인해 주세요.");
     }
+    const sessionId = /^\/api\/sessions\/([a-f0-9-]{36})(?:\/|$)/.exec(path)?.[1];
+    if (res.status === 404 && sessionId) {
+      const body = await res.clone().json().catch(() => ({}));
+      if (body.error === "unknown_session") {
+        window.dispatchEvent(new CustomEvent("ags-session-missing", { detail: sessionId }));
+        throw new Error("이미 삭제된 대화입니다.");
+      }
+    }
+    if (path.endsWith("/delete-preview") || (sessionId && method === "DELETE" && path === `/api/sessions/${sessionId}`)) {
+      const body = await res.json().catch(() => ({}));
+      if (body.error === "delete_requires_archive") throw new Error("보관된 대화만 삭제할 수 있습니다.");
+      if (body.error === "delete_busy") throw new Error("응답이나 검토·요약이 끝난 뒤 다시 시도하세요.");
+      if (body.error === "delete_changed") throw new Error("대화나 확인 상태가 바뀌었습니다. 삭제 대상을 다시 확인하세요.");
+      throw new Error(`대화를 삭제하지 못했습니다 (HTTP ${res.status}).`);
+    }
     if (path.endsWith("/title") && res.status === 409) {
       const { title } = await res.json();
       throw new TitleConflict(title);

@@ -35,7 +35,9 @@
 | POST /api/sessions/search | `{query}`로 저장된 질문·답변을 검색한다. `{results,truncated}`를 반환한다. |
 | GET /api/sessions/{id} | 세션 설정과 시간순 턴 기록 |
 | PATCH /api/sessions/{id} | JSON의 preset 값 변경. 다음 턴부터 적용 |
-| PUT /api/sessions/{id}/section | `{sectionId}`로 미소속 대화를 기존 섹션에 연결하고 갱신된 세션을 반환한다. 없는 섹션은 400, 응답 중이거나 이미 소속이 있으면 409 |
+| POST /api/sessions/{id}/delete-preview | 보관한 대화의 제목, 턴 수, 섹션 기억에서 빠질 저장 요약 수, 삭제 확인값(`confirmation`)을 반환한다. |
+| DELETE /api/sessions/{id} | `{confirmation}`으로 해당 대화를 영구 삭제한다. 복원했거나 확인 상태가 바뀌었거나 응답·검토·요약 중이면 409. 이미 삭제한 대상은 404. |
+| PUT /api/sessions/{id}/section | 연결은 `{sectionId, sectionRevision}`, 해제는 `{sectionId: null, previousSectionId, sectionRevision}`으로 요청한다. 최초 연결은 버전을 생략할 수 있다. 갱신된 세션을 반환한다. 없는 섹션은 400, 소속·버전 충돌이나 응답 중에는 409, 구간 요약 중 해제는 409 `checkpoint_busy` |
 | PUT /api/sessions/{id}/archive | `{archived: boolean}`으로 보관·복원. 이미 요청한 상태이거나 응답 중이면 409 |
 | PUT /api/sessions/{id}/title | 이전 이름과 새 이름을 받아 대화 이름 변경 |
 | POST /api/sessions/{id}/chat | 기존 채팅 SSE 형식으로 응답하며 DB에 턴 저장. 같은 세션에서 응답 진행 중이면 409 |

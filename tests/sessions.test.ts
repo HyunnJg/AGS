@@ -235,3 +235,61 @@ test("대화 본문 검색은 한글·기호를 문자 그대로 찾고 턴 위�
   assert.equal(common.results.length, 30);
   assert.equal(common.results.at(-1)?.turnId, "other-4");
 });
+
+test("보관 대화 삭제는 확인한 상태만 원자적으로 지우고 별도 검토 대화를 보존한다", t => {
+  const dir = mkdtempSync(join(tmpdir(), "ags-delete-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "sessions.sqlite");
+  const db = new SessionStore(path);
+  const source = db.create();
+  const model = { provider: "mock", model: "" } as const;
+  db.startReview(source.id, "first-review", model, "삭제할 검토 대화");
+  db.finishReview("first-review", "결과");
+  const id = db.review(source.id)?.reviewer;
+  assert.ok(id);
+  const target = db.requireSession(id);
+  assert.throws(() => db.prepareDeletion(id), /delete_requires_archive/);
+  db.setSessionArchived(id, true);
+  const stale = db.prepareDeletion(id);
+  db.setSessionArchived(id, false);
+  db.setSessionArchived(id, true);
+  assert.throws(() => db.deleteArchivedSession(id, stale.confirmation), /delete_changed/);
+  const beforeSend = db.prepareDeletion(id);
+  assert.ok(db.begin(target, "next-turn", "실험 메모"));
+  assert.throws(() => db.deleteArchivedSession(id, beforeSend.confirmation), /delete_busy/);
+  db.finish("next-turn", "completed");
+  assert.throws(() => db.deleteArchivedSession(id, beforeSend.confirmation), /delete_changed/);
+  db.startReview(id, "second-review", model, "다른 검토에 보낸 발췌");
+  assert.throws(() => db.prepareDeletion(id), /delete_busy/);
+  db.finishReview("second-review", "별도 검토 결과");
+  const separate = db.review(id)?.reviewer;
+  assert.ok(separate);
+  const project = db.addProject("보존할 폴더");
+  const section = db.addSection(project, "요약");
+  db.changeSessionSection(id, section, null, 0);
+  db.reserveCheckpoint(id, "next-turn", "next-turn", "summary.md", "fixture-version");
+  db.finishCheckpoint("summary.md", true);
+  db.addReference(id, project, "file.md", "v1", 1, 1, "첨부");
+  db.setLimits(id, { turns: 4, inputBudget: null, outputBudget: null });
+  db.setSources(id, { memory: "목표", retrieval: "", revision: 0 });
+  db.startCall("chat", model, id)?.finish("completed");
+  db.startCall("chat", model, source.id)?.finish("completed");
+  const approved = db.prepareDeletion(id);
+  assert.equal(approved.turns, 2);
+  assert.equal(approved.savedSummaries, 1);
+  db.deleteArchivedSession(id, approved.confirmation);
+  assert.throws(() => db.deleteArchivedSession(id, approved.confirmation), /unknown_session/);
+  assert.deepEqual(db.reviewHistory(source.id), []);
+  assert.equal(db.turns(separate)[0]?.reply, "별도 검토 결과");
+  assert.deepEqual(db.recentCheckpoints(section), []);
+  assert.deepEqual(db.references(id), []);
+  assert.deepEqual(db.callList().map(row => row.session), [source.id]);
+  db.close();
+  const check = new DatabaseSync(path);
+  try {
+    assert.deepEqual(check.prepare("PRAGMA foreign_key_check").all(), []);
+    for (const table of ["session_sources", "context_limits", "turns", "archived_sessions"]) {
+      assert.equal(check.prepare(`SELECT 1 FROM ${table} WHERE session_id=?`).get(id), undefined);
+    }
+  } finally { check.close(); }
+});

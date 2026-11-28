@@ -409,6 +409,7 @@ export function createChatServer(
       const body = await readBody(req);
       if (res.destroyed) return;
       const controller = new AbortController();
+      store.requireSession(id);
       let reviewId: string | undefined;
       const abort = () => controller.abort();
       res.once("close", abort);
@@ -439,14 +440,28 @@ export function createChatServer(
       return json(store.references(sessionId));
     }
     const route =
-      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title|\/archive|\/section)?$/.exec(
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/delete-preview|\/checkpoint|\/sources|\/title|\/archive|\/section)?$/.exec(
         path,
       );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/delete-preview") {
+      if (req.method !== "POST") return allow("POST");
+      if (checkpoints.isBusy(session.id)) throw new RequestError(409, "delete_busy");
+      return json(store.prepareDeletion(session.id));
+    }
+    if (session && store && !route?.[2] && req.method === "DELETE") {
+      const data = await readBody(req);
+      if (!data || typeof data !== "object" || !("confirmation" in data) || typeof data.confirmation !== "string")
+        throw new RequestError(400, "invalid_delete");
+      if (checkpoints.isBusy(session.id)) throw new RequestError(409, "delete_busy");
+      store.deleteArchivedSession(session.id, data.confirmation);
+      return json({ deleted: session.id });
+    }
     if (session && store && route?.[2] === "/section") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);
+      store.requireSession(session.id);
       if (!body || typeof body !== "object" || !("sectionId" in body)) throw new RequestError(400, "invalid_section");
       const revision = "sectionRevision" in body ? body.sectionRevision : undefined;
       if (revision !== undefined && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0))
@@ -463,6 +478,7 @@ export function createChatServer(
     if (session && store && route?.[2] === "/archive") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);
+      store.requireSession(session.id);
       if (!body || typeof body !== "object" || !("archived" in body) || typeof body.archived !== "boolean")
         throw new RequestError(400, "invalid_archive");
       store.setSessionArchived(session.id, body.archived);
@@ -471,6 +487,7 @@ export function createChatServer(
     if (session && store && route?.[2] === "/title") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);
+      store.requireSession(session.id);
       if (!body || typeof body !== "object" || !("title" in body) || !validSessionTitle(body.title) ||
           !("previous" in body) || typeof body.previous !== "string") throw new RequestError(400, "invalid_title");
       const title = body.title.trim();
@@ -490,7 +507,7 @@ export function createChatServer(
         return json(
           await checkpoints.run(
             store,
-            store.get(session.id) ?? session,
+            store.requireSession(session.id),
             body,
             providers,
             stateDirectory,
@@ -505,6 +522,7 @@ export function createChatServer(
       if (req.method === "GET") return json(store.sources(session.id));
       if (req.method !== "PUT") return allow("GET, PUT");
       const data = await readBody(req);
+      store.requireSession(session.id);
       if (
         !data ||
         typeof data !== "object" ||
@@ -534,6 +552,7 @@ export function createChatServer(
       if (req.method === "GET") return json(store.limits(session.id));
       if (req.method !== "PUT") return allow("GET, PUT");
       const limits = await readBody(req);
+      store.requireSession(session.id);
       if (!isLimits(limits)) throw new RequestError(400, "invalid_limits");
       store.setLimits(session.id, limits);
       return json(store.limits(session.id));
@@ -550,16 +569,17 @@ export function createChatServer(
         !isLimits(body.limits)
       )
         throw new RequestError(400, "invalid_preview");
-      session = store.get(session.id) ?? session;
+      session = store.requireSession(session.id);
       const state = await memoryFor(store, session.sectionId);
-      const latest = store.get(session.id) ?? session;
+      const latest = store.requireSession(session.id);
       if (latest.sectionRevision !== session.sectionRevision) throw new RequestError(409, "session_section_changed");
       return json(contextFor(store, latest, body.message, state, body.limits));
     }
     if (session && store && !route?.[2]) {
       if (req.method === "GET") return json({ session, turns: store.turns(session.id) });
-      if (req.method !== "PATCH") return allow("GET, PATCH");
+      if (req.method !== "PATCH") return allow("GET, PATCH, DELETE");
       const body = await readBody(req);
+      store.requireSession(session.id);
       if (isModelSelection(body)) {
         if (store.isStreaming(session.id)) throw new RequestError(409, "session_busy");
         if (!providers.options.find((o) => o.id === body.provider)?.enabled)
@@ -593,11 +613,11 @@ export function createChatServer(
     const { message } = body;
     if (res.destroyed) return;
     // Read settings at admission, after receiving the complete request body.
-    if (session && store) session = store.get(session.id);
+    if (session && store) session = store.requireSession(session.id);
     const revisionAtAdmission = session?.sectionRevision;
     const state = session && store ? await memoryFor(store, session.sectionId) : undefined;
     if (res.destroyed) return;
-    if (session && store) session = store.get(session.id);
+    if (session && store) session = store.requireSession(session.id);
     if (session?.sectionRevision !== revisionAtAdmission) throw new RequestError(409, "session_section_changed");
     const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
