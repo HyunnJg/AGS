@@ -1,7 +1,9 @@
 // Preloaded only in the browser test's server process. All provider traffic stays on its fixture port.
 const send = globalThis.fetch;
-const fixture = new URL(`http://127.0.0.1:${process.env.AGS_TEST_PROVIDER_PORT}`);
+const port = process.env.AGS_TEST_PROVIDER_PORT;
+const fixture = port ? new URL(`http://127.0.0.1:${port}`) : undefined;
 globalThis.fetch = (input, init) => {
+  if (!fixture) throw new Error("Unexpected provider request in mock-only browser test");
   const url = new URL(input);
   if (url.origin === "https://api.openai.com") return send(new URL(`/openai${url.pathname}`, fixture), init);
   if (url.origin === "https://generativelanguage.googleapis.com")

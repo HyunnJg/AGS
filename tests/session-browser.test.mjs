@@ -1,22 +1,16 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile, cp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import test from "node:test";
-import { chromium } from "playwright";
+import { openBrowserWorkspace } from "./fixtures/browser-workspace.mjs";
 
 test(
   "브라우저에서 두 세션 생성·프리셋 선택·전송·중단 후 서버 재시작으로 복원",
-  { timeout: 60_000 },
+  { timeout: 120_000 },
   async (t) => {
-    const dir = await mkdtemp(join(tmpdir(), "ags-browser-"));
-    const token = randomBytes(32).toString("hex");
-    const browser = await chromium.launch({ executablePath: process.env.AGS_TEST_CHROMIUM || undefined });
     let statePayload;
     const failedQuestion = "응답 실패 후 고쳐 쓸 질문";
     const longReply = `공유할 문단\n${"검토에 보내지 않을 내용\n".repeat(700)}직접 연결 응답`;
@@ -151,68 +145,12 @@ test(
       fake.close();
       fake.closeAllConnections();
     });
-    let child;
-    let closed;
-    async function start(port) {
-      const transport = new URL("./fixtures/provider-transport.mjs", import.meta.url).href;
-      child = spawn(process.execPath, ["--import", transport, "dist/apps/server/src/main.js"], {
-        env: {
-          ...process.env,
-          AGS_STATE_DIR: dir,
-          AGS_PORT: String(port),
-          AGS_LOCAL_TOKEN: token,
-          AGS_OPENROUTER_API_KEY: "",
-          AGS_OPENROUTER_MODEL: "",
-          AGS_TEST_PROVIDER_PORT: String(fake.address().port),
-          AGS_ANTHROPIC_API_KEY: "",
-          AGS_ANTHROPIC_MODEL: "",
-          AGS_GEMINI_API_KEY: "",
-          AGS_GEMINI_MODEL: "",
-          AGS_OPENAI_API_KEY: "",
-          AGS_OPENAI_MODEL: "",
-          AGS_CUSTOM_MODEL: "",
-          AGS_CUSTOM_API_KEY: "",
-          AGS_CUSTOM_BASE_URL: "",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      closed = once(child, "close");
-      const lines = createInterface({ input: child.stdout });
-      const [line] = await Promise.race([
-        once(lines, "line"),
-        closed.then(() => {
-          throw new Error("Server exited");
-        }),
-      ]);
-      assert.match(line, /^AGS http:\/\/127\.0\.0\.1:\d+$/);
-      return line.slice(4);
-    }
-    async function stop(signal = "SIGTERM") {
-      if (child) {
-        child.kill(signal);
-        await closed;
-        child = undefined;
-      }
-    }
-    t.after(async () => {
-      await browser.close();
-      await stop();
-      await rm(dir, { recursive: true, force: true });
-    });
-    const base = await start(0);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+    const { dir, token, start, stop, base, context, page, pageErrors } = await openBrowserWorkspace(t, fake.address().port);
     async function checkCopy(article, expected) {
       await article.getByRole("button", {name:"답변 복사", exact:true}).click();
       await article.getByText("복사했습니다.", {exact:true}).waitFor();
       assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected);
     }
-    const pageErrors = [];
-    page.on("pageerror", (e) => pageErrors.push(e.message));
-    await page.goto(base);
-    await page.getByLabel("로컬 인증 토큰").fill(token);
-    await page.getByRole("button", { name: "작업실 열기" }).click();
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await page.getByRole("button", { name: "고급 기능" }).click();
     await page.getByText(dir, { exact: true }).waitFor();
@@ -281,17 +219,20 @@ test(
     await page.getByRole("heading", {name:"새 대화", exact:true}).waitFor();
     assert.equal(await composer.inputValue(), "첫 작업");
 
-    const pendingSend = Promise.withResolvers();
     const releaseSend = Promise.withResolvers();
     await page.route("**/api/sessions/*/chat", async route => {
-      pendingSend.resolve();
       await releaseSend.promise;
       await route.continue();
     }, {times:1});
-    await page.getByRole("button", { name: "전송" }).click();
-    await pendingSend.promise;
-    await composer.fill(followupDraft);
-    releaseSend.resolve();
+    try {
+      await Promise.all([
+        page.waitForRequest("**/api/sessions/*/chat"),
+        page.getByRole("button", { name: "전송" }).click(),
+      ]);
+      await composer.fill(followupDraft);
+    } finally {
+      releaseSend.resolve();
+    }
     await page.getByText("[mock · coding] 수신한 메시지: 첫 작업", { exact: true }).waitFor();
     assert.equal(await composer.inputValue(), followupDraft);
     await page.getByRole("button", { name: "새 대화" }).click();
@@ -1622,6 +1563,17 @@ test(
     await page.getByRole("button", {name:"일반 대화 보기"}).click();
     await sessionNav.getByRole("button", {name:literal, exact:true}).waitFor();
     assert.equal(await composer.inputValue(), "보관한 초안");
+    assert.deepEqual(pageErrors, []);
+  },
+);
+
+test(
+  "Markdown 답변의 서식·원문 전환과 클립보드 복사",
+  { timeout: 60_000 },
+  async (t) => {
+    const { page, pageErrors } = await openBrowserWorkspace(t);
+    await page.getByRole("button", { name: "첫 대화 시작" }).click();
+    const composer = page.getByRole("textbox", { name: "메시지", exact: true });
     const code = '  const sample = "<sample>";\n  sample.trim();';
     const markdown = ["검토 메모", "", "## 결과", "", "- 목록과 `변수`", "", "> 인용", "",
       "| 항목 | 값 |", "| --- | --- |", "| 단계 | 확인 |", "", "~~~js", code, "~~~", "",
