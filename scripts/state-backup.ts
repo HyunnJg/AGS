@@ -151,12 +151,13 @@ async function restoreInto(file: string, stage: string) {
       if (!Array.isArray(record) || verified) throw invalid();
       const [kind, key, value] = record;
       if (!header) {
-        if (kind !== format || key !== 1 || (value !== 5 && value !== 6 && value !== 7 && value !== 8 && value !== schema(db)))
+        if (kind !== format || key !== 1 || (value !== 5 && value !== 6 && value !== 7 && value !== 8 && value !== 9 && value !== schema(db)))
           throw new BackupError("이 AGS 버전에서 복원할 수 없는 백업 형식 또는 DB 버전입니다.");
         // v5 shared_prompt rows predate the language column. SQLite supplies its default on insert.
         if (value === 5 || value === 6) remaining.delete("custom_presets");
         if (value === 5) remaining.set("shared_prompt", ["id", "prompt"]);
         if (value === 7) remaining.set("custom_presets", ["id", "name", "instructions"]);
+        if (value < 10) remaining.delete("archived_sessions");
         legacyTitles = value < 9;
         header = true;
       } else if (kind === "sha256") {

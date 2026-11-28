@@ -109,6 +109,10 @@ export async function api(
         workspaceMessages[body.error] ?? `작업공간 요청을 완료하지 못했습니다 (HTTP ${res.status}).`,
       );
     }
+    if (path.endsWith("/archive") && res.status === 409) {
+      const body = await res.json();
+      throw new Error(body.error === "archive_streaming" ? "응답이 끝난 뒤 보관 상태를 변경하세요." : "다른 창에서 대화 보관 상태를 변경했습니다.");
+    }
     if (path.startsWith("/api/providers/")) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error === "provider_auth" ? workspaceMessages.provider_auth : "목록을 가져오지 못했습니다. 모델 ID를 직접 입력할 수 있습니다.");

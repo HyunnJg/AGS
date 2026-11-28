@@ -439,11 +439,19 @@ export function createChatServer(
       return json(store.references(sessionId));
     }
     const route =
-      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title)?$/.exec(
+      /^\/api\/sessions\/([a-f0-9-]{36})(\/chat|\/context|\/context-preview|\/checkpoint|\/sources|\/title|\/archive)?$/.exec(
         path,
       );
     let session = route?.[1] && store ? store.get(route[1]) : undefined;
     if (route && !session) throw new RequestError(404, "unknown_session");
+    if (session && store && route?.[2] === "/archive") {
+      if (req.method !== "PUT") return allow("PUT");
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || !("archived" in body) || typeof body.archived !== "boolean")
+        throw new RequestError(400, "invalid_archive");
+      store.setSessionArchived(session.id, body.archived);
+      return json({ archived: body.archived });
+    }
     if (session && store && route?.[2] === "/title") {
       if (req.method !== "PUT") return allow("PUT");
       const body = await readBody(req);

@@ -824,3 +824,9 @@ header h2 {
 @media (max-width: 680px) {
   .body-search-launcher { grid-row: 4; grid-column: 1 / -1; margin: 0; }
 }
+
+.archive-list { padding: .3rem .55rem; text-align: left; font-size: .85rem; }
+@media (max-width: 680px) {
+  .layout aside:has(.archive-list) .body-search-launcher { grid-column: 1; }
+  .archive-list { grid-row: 4; grid-column: 2; }
+}
