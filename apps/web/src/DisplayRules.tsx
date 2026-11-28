@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   maxRules,
   maxText,
@@ -9,35 +9,8 @@ import {
 import { api, SettingsConflict } from "./api.ts";
 import { useDisplayText } from "./useDisplayText.ts";
 
-function CopyReply({ text }: { text: string }) {
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
-  useEffect(() => {
-    if (!message) return;
-    const timeout = setTimeout(() => setMessage(""), 4000);
-    return () => clearTimeout(timeout);
-  }, [message]);
-  async function copy() {
-    setMessage("");
-    setPending(true);
-    try {
-      await navigator.clipboard.writeText(text);
-      setMessage("복사했습니다.");
-    } catch {
-      setMessage("클립보드에 복사할 수 없습니다. 답변을 선택해 직접 복사하세요.");
-    } finally {
-      setPending(false);
-    }
-  }
-  return (
-    <>
-      <button className="raw-reply" type="button" title="현재 표시된 답변 복사" disabled={pending} onClick={() => void copy()}>
-        답변 복사
-      </button>
-      <output>{message}</output>
-    </>
-  );
-}
+import { CopyText } from "./CopyText.tsx";
+import { renderReplyMarkdown } from "./MarkdownReply.tsx";
 
 export function ReplyText({
   text,
@@ -50,22 +23,24 @@ export function ReplyText({
 }) {
   const [original, showOriginal] = useState(false);
   const result = useDisplayText(text, rules, finished);
+  const formatted = useMemo(() => finished && !result.error ? renderReplyMarkdown(result.text) : null,
+    [finished, result.text, result.error]);
   const visibleText = original ? text : result.text;
   return (
     <>
-      <div className="reply">{visibleText}</div>
+      <div className={formatted && !original ? "reply markdown-reply" : "reply"}>{original ? text : formatted ?? visibleText}</div>
       {result.error && <small>{result.error} 원문을 표시합니다.</small>}
-      {text !== result.text && (
+      {(text !== result.text || formatted) && (
         <button
           className="raw-reply"
           type="button"
           aria-pressed={original}
           onClick={() => showOriginal(!original)}
         >
-          {original ? "치환 결과 보기" : "원문 보기"}
+          {original ? (formatted ? "서식 보기" : "치환 결과 보기") : "원문 보기"}
         </button>
       )}
-      {finished && visibleText && <CopyReply key={original ? "original" : "display"} text={visibleText} />}
+      {finished && visibleText && <CopyText label="답변 복사" key={original ? "original" : "display"} text={visibleText} />}
     </>
   );
 }

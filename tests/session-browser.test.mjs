@@ -1590,6 +1590,30 @@ test(
     await page.getByRole("button", {name:"일반 대화 보기"}).click();
     await sessionNav.getByRole("button", {name:literal, exact:true}).waitFor();
     assert.equal(await composer.inputValue(), "보관한 초안");
+    const code = '  const sample = "<sample>";\n  sample.trim();';
+    const markdown = ["검토 메모", "", "## 결과", "", "- 목록과 `변수`", "", "> 인용", "",
+      "| 항목 | 값 |", "| --- | --- |", "| 단계 | 확인 |", "", "~~~js", code, "~~~", "",
+      "<script type=text/plain>sample</script>", "", "[제한](javascript:void(0))", "", "![사진](/sample.png)"].join("\n");
+    await composer.fill(markdown);
+    await page.getByRole("button", { name: "전송" }).click();
+    const article = page.locator(".conversation:visible article").last();
+    const reply = article.locator(".reply");
+    await reply.getByRole("heading", { name:"결과" }).waitFor();
+    assert.equal(await reply.locator("li code").textContent(), "변수");
+    assert.equal(await reply.locator("blockquote").innerText(), "인용");
+    await reply.getByRole("cell", { name:"확인" }).waitFor();
+    assert.equal(await reply.locator("script,img,a").count(), 0);
+    assert.equal(await reply.locator("pre code").textContent(), code);
+    await reply.getByRole("button", {name:"코드 복사"}).click();
+    await reply.getByText("복사했습니다.", {exact:true}).waitFor();
+    assert.equal(await page.evaluate(async () => (await navigator.clipboard.readText()).replaceAll("\r\n", "\n")), code);
+    const markdownSource = `[mock] 수신한 메시지: ${markdown}`;
+    await article.getByRole("button", {name:"답변 복사"}).click();
+    await page.waitForFunction(async expected => (await navigator.clipboard.readText()).replaceAll("\r\n", "\n") === expected, markdownSource);
+    await article.getByRole("button", {name:"원문 보기"}).click();
+    assert.equal(await reply.textContent(), markdownSource);
+    await article.getByRole("button", {name:"서식 보기"}).click();
+    await reply.locator("pre code").waitFor();
     assert.deepEqual(pageErrors, []);
   },
 );

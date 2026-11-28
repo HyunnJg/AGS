@@ -31,6 +31,7 @@ jobs:
           Copy-Item scripts/open-windows.mjs -Destination "$package/scripts"
           '{"type":"module"}' | Set-Content "$package/package.json" -Encoding utf8
           New-Item -ItemType Directory "$package/licenses" -Force | Out-Null
+          Copy-Item apps/web/node_modules/marked/LICENSE "$package/licenses/marked.txt"
           Copy-Item apps/web/node_modules/react/LICENSE "$package/licenses/react.txt"
           Copy-Item apps/web/node_modules/react-dom/LICENSE "$package/licenses/react-dom.txt"
           $scheduler = Get-ChildItem "node_modules/.pnpm/scheduler@*/node_modules/scheduler/LICENSE" | Select-Object -First 1
