@@ -831,3 +831,14 @@ header h2 {
   .layout aside:has(.archive-list) .body-search-launcher { grid-column: 1; }
   .archive-list { grid-row: 4; grid-column: 2; }
 }
+
+.markdown-reply { white-space: normal; min-width: 0; }
+.markdown-reply p, .markdown-reply li { white-space: pre-line; }
+.markdown-reply > :first-child { margin-top: 0; }
+.markdown-reply > :last-child { margin-bottom: 0; }
+.markdown-reply blockquote { border-left: 3px solid #b1c2b3; padding-left: .8rem; margin-inline: 0; }
+.reply-table, .reply-code pre { max-width: 100%; overflow-x: auto; }
+.reply-table table { border-collapse: collapse; }
+.reply-table th, .reply-table td { border: 1px solid #c7d0c5; padding: .3rem .6rem; }
+.reply-code { background: #f0f3ef; padding: .55rem .75rem; margin-block: .6rem; border-radius: 6px; }
+.reply-code pre { white-space: pre; margin: .4rem 0; }
