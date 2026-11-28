@@ -650,7 +650,7 @@ test(
     await page.getByText("83–83 / 83줄").waitFor();
     await page.getByRole("button", { name: "섹션에서 새 대화" }).click();
     await page.getByRole("dialog").waitFor({ state: "hidden" });
-    await page.getByText(`${projectName} / 사료 검토`, { exact: true }).waitFor();
+    await page.locator(".conversation:visible header").getByText(`${projectName} / 사료 검토`, { exact: true }).waitFor();
     await page.getByLabel("메시지").fill("연표 확인");
     await page.getByRole("button", { name: "전송" }).click();
     await page.getByText("[mock] 수신한 메시지: 연표 확인", { exact: true }).waitFor();
@@ -1601,3 +1601,59 @@ test(
     assert.deepEqual(pageErrors, []);
   },
 );
+
+test("대화 목록에서 프로젝트 섹션·미소속·검색어·보관함으로 좁히기", { timeout: 60_000 }, async (t) => {
+  const { page, token, base, pageErrors } = await openBrowserWorkspace(t);
+  const headers = { authorization: `Bearer ${token}` };
+  const filter = page.getByRole("combobox", { name: "대화 목록 섹션" });
+  await page.getByRole("button", { name: "첫 대화 시작" }).waitFor();
+  assert.equal(await filter.count(), 0);
+  for (const name of ["기록 조사", "현장 검토"]) {
+    assert.equal((await page.request.post(`${base}/api/projects`, { headers, data: { name } })).status(), 201);
+  }
+  const catalog = await (await page.request.get(`${base}/api/projects`, { headers })).json();
+  const [first, second] = catalog.sections;
+  for (const [title, section, archived] of [
+    ["첫 자료", first, false], ["지난 자료", first, true],
+    ["둘째 자료", second, false], ["받은 자료", null, false],
+  ]) {
+    const data = { provider: "mock", model: "", ...(section && { sectionId: section.id }) };
+    const session = await (await page.request.post(`${base}/api/sessions`, { headers, data })).json();
+    const path = `${base}/api/sessions/${session.id}`;
+    assert.ok((await page.request.put(`${path}/title`, { headers, data: { previous: session.title, title } })).ok());
+    if (archived) assert.ok((await page.request.put(`${path}/archive`, { headers, data: { archived } })).ok());
+  }
+  await page.reload();
+  const nav = page.getByRole("navigation", { name: "대화 목록" });
+  const search = page.getByRole("searchbox", { name: "대화 목록 검색" });
+  await nav.getByRole("button", { name: "받은 자료" }).click();
+  const draft = page.getByRole("textbox", { name: "메시지", exact: true });
+  await draft.fill("이어서 쓸 메모");
+  await filter.selectOption({ label: "기록 조사 / 일반" });
+  assert.deepEqual(await nav.getByRole("button").allTextContents(), ["첫 자료"]);
+  assert.equal(await draft.inputValue(), "이어서 쓸 메모");
+  await search.fill("둘째");
+  await nav.getByText("일치하는 대화가 없습니다.").waitFor();
+  await filter.selectOption({ label: "현장 검토 / 일반" });
+  await nav.getByRole("button", { name: /둘째 자료/ }).click();
+  assert.equal(await filter.inputValue(), second.id);
+  assert.equal(await search.inputValue(), "둘째");
+  await search.fill("자료");
+  await filter.selectOption(first.id);
+  await page.getByRole("button", { name: "보관함 보기" }).click();
+  await nav.getByRole("button", { name: /지난 자료/ }).waitFor();
+  assert.equal(await nav.getByRole("button").count(), 1);
+  await filter.selectOption({ label: "미소속 대화" });
+  await nav.getByText("일치하는 대화가 없습니다.").waitFor();
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.getByRole("button", { name: "일반 대화 보기" }).click();
+  await nav.getByRole("button", { name: /받은 자료/ }).click();
+  assert.equal(await draft.inputValue(), "이어서 쓸 메모");
+  assert.ok(await filter.evaluate(el => el.getBoundingClientRect().right <= window.innerWidth));
+  await page.getByRole("button", { name: "새 대화" }).click();
+  await nav.getByRole("button", { name: "새 대화", exact: true }).waitFor();
+  assert.equal(await filter.inputValue(), "");
+  assert.equal(await search.inputValue(), "");
+  assert.equal(await nav.getByRole("button").count(), 4);
+  assert.deepEqual(pageErrors, []);
+});

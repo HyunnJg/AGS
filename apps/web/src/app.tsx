@@ -7,7 +7,7 @@ import { AttachedReferences, useFileReferences } from "./FileReferences.tsx";
 import { ProjectWorkspace } from "./ProjectWorkspace.tsx";
 import { ReplyText } from "./DisplayRules.tsx";
 import type { DisplayRule } from "../../../packages/contracts/src/display.ts";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { turnStatusLabels, presets, isCustomPresetId, type CustomPresetSummary, type Preset, type Session, type Turn, type TurnSearchHit } from "../../../packages/contracts/src/sessions.ts";
 import { api, chatEvents } from "./api.ts";
@@ -464,10 +464,19 @@ function restoreDrafts(sessions: Session[]) {
 function Workspace({ token }: { token: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
+  const [sectionFilter, setSectionFilter] = useState("");
+  const sectionOptions = useMemo(() => {
+    const sections = new Map<string, string>();
+    for (const session of sessions) {
+      if (session.sectionId && session.sectionLabel) sections.set(session.sectionId, session.sectionLabel);
+    }
+    return [...sections].sort(([, a], [, b]) => a.localeCompare(b, "ko"));
+  }, [sessions]);
   const terms = sessionQuery.trim().normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
   const [showArchived, setShowArchived] = useState(false);
   const visibleSessions = sessions.filter(session => {
     if (Boolean(session.archived) !== showArchived) return false;
+    if (sectionFilter && (session.sectionId ?? "unassigned") !== sectionFilter) return false;
     const searchable = [session.title, session.sectionLabel, providerNames[session.provider], session.provider, session.model]
       .join(" ").normalize("NFC").toLowerCase();
     return terms.every(term => searchable.includes(term));
@@ -541,7 +550,10 @@ function Workspace({ token }: { token: string }) {
   const mounted = ready ? sessions.filter((s) => s.id === id || running.includes(s.id)) : [];
   const select = useCallback((id: string, keepSearch = false, hit?: TurnSearchHit) => {
     setSearchHit(hit ? { ...hit } : undefined);
-    if (!keepSearch) setSessionQuery("");
+    if (!keepSearch) {
+      setSessionQuery("");
+      setSectionFilter("");
+    }
     setId(id);
     sessionStorage.setItem("ags-session", id);
   }, []);
@@ -621,6 +633,14 @@ function Workspace({ token }: { token: string }) {
             onChange={e => setSessionQuery(e.target.value)}
           />
         )}
+        {sectionOptions.length > 0 && (
+          <select className="session-section-filter" aria-label="대화 목록 섹션" value={sectionFilter}
+            onChange={e => setSectionFilter(e.target.value)}>
+            <option value="">전체 섹션</option>
+            <option value="unassigned">미소속 대화</option>
+            {sectionOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        )}
         {ready && <ConversationSearch token={token} openHit={async (hit, close, signal) => {
           // Another tab may have created the conversation since this sidebar loaded.
           if (!sessions.some(s => s.id === hit.sessionId)) {
@@ -638,7 +658,7 @@ function Workspace({ token }: { token: string }) {
           {showArchived ? "일반 대화 보기" : "보관함 보기"}
         </button>}
         <nav aria-label="대화 목록">
-          {(terms.length > 0 || showArchived) && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
+          {(terms.length > 0 || sectionFilter || showArchived) && visibleSessions.length === 0 && <output>일치하는 대화가 없습니다.</output>}
           {visibleSessions.map((s) => (
             <button
               type="button"
