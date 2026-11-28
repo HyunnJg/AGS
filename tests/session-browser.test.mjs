@@ -1793,3 +1793,131 @@ test("mock 대화에서 한 번 허용한 폴더 검색의 근거와 기록을 �
   assert.equal((await (await request.get(url, { headers })).json()).turns.length, 3);
   assert.deepEqual(pageErrors, []);
 });
+
+test("OpenAI에 허용한 최상위 이름만 tool 결과로 보내고 한 턴 뒤 공유를 해제한다", { timeout: 90_000 }, async t => {
+  const requests = [];
+  const fake = createServer(async (req, res) => {
+    if (req.url !== "/openai/v1/chat/completions") return res.writeHead(404).end();
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    requests.push(body);
+    if (body.tools) {
+      const ask = body.messages.at(-1).content;
+      if (ask === "폴더 변경 대기" || ask === "요청 중단 대기") await new Promise(resolve => fake.emit("folder-decision", resolve));
+      const msg = { role: "assistant", content: null, tool_calls: [
+        { id: "call_fixture", type: "function", function: { name: "list_entries", arguments: "{}" } },
+      ] };
+      if (ask === "잘못된 도구") msg.tool_calls[0].function.name = "unknown";
+      if (ask === "목록 없이 답해") {
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { role: "assistant", content: "직접 답변" } }],
+        }));
+      } else {
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+          choices: [{ finish_reason: "tool_calls", message: msg }], usage: { prompt_tokens: 30, completion_tokens: 5 },
+        }));
+      }
+    } else {
+      const content = body.messages.at(-1).role === "tool" ? "자료 목록에 안내.md가 있습니다." : "일반 답변";
+      res.writeHead(200, { "content-type": "text/event-stream" })
+        .end(`data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    }
+  });
+  fake.listen(0, "127.0.0.1");
+  await once(fake, "listening");
+  t.after(() => { fake.closeAllConnections(); fake.close(); });
+  const { page, token, base, pageErrors } = await openBrowserWorkspace(t, fake.address().port);
+  const headers = { authorization: `Bearer ${token}` };
+  const req = page.request;
+  assert.ok((await req.put(`${base}/api/settings/connections/openai`, { headers,
+    data: { revision: 0, baseUrl: "", defaultModel: "fixture", key: "synthetic-openai" } })).ok());
+  const folder = await mkdtemp(join(tmpdir(), "ags-shared-names-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  await writeFile(join(folder, "안내.md"), "로컬에서만 볼 본문");
+  await writeFile(join(folder, ".hidden.md"), "숨긴 문서");
+  const project = await (await req.post(`${base}/api/projects`, { headers, data: { name: "공유 실험" } })).json();
+  const { sections } = await (await req.get(`${base}/api/projects`, { headers })).json();
+  const sectionId = sections.find(s => s.projectId === project.id).id;
+  const linked = await req.put(`${base}/api/projects/${project.id}/root`, { headers, data: { path: folder, previous: null } });
+  const { root } = await linked.json();
+  const session = await (await req.post(`${base}/api/sessions`, { headers, data: { sectionId, provider: "openai", model: "fixture" } })).json();
+  const url = `${base}/api/sessions/${session.id}`;
+  const limits = await (await req.get(`${url}/context`, { headers })).json();
+  assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: 100 } })).ok());
+  const { scope } = await (await req.get(`${url}/workspace-read`, { headers })).json();
+  assert.equal((await req.post(`${url}/chat`, { headers, data: { message: "이전 클라이언트", workspaceScope: scope } })).status(), 409);
+  assert.equal(requests.length, 0);
+  await page.reload();
+  await page.getByRole("navigation", { name: "대화 목록" }).getByRole("button", { name: "새 대화" }).click();
+  const grant = page.getByRole("checkbox", { name: /OpenAI에 공유 허용/ });
+  assert.equal(await grant.isChecked(), false);
+  await grant.click();
+  await page.getByText(root, { exact: false }).waitFor();
+  const input = page.getByRole("textbox", { name: "메시지", exact: true });
+  await input.fill("작업 폴더에 어떤 문서가 있지?");
+  await input.press("Enter");
+  await page.getByText("자료 목록에 안내.md가 있습니다.", { exact: true }).waitFor();
+  await page.getByText("작업 폴더 조회 · 1회").click();
+  await page.getByText("폴더 목록 · 작업 폴더 · 1개").waitFor();
+  assert.equal(await grant.isChecked(), false);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].tools.map(t => t.function.name), ["list_entries"]);
+  assert.equal(requests[0].parallel_tool_calls, false);
+  const final = requests[1];
+  assert.equal(final.tools, undefined);
+  assert.equal(final.max_completion_tokens, 95);
+  assert.equal(final.messages.at(-2).tool_calls[0].id, "call_fixture");
+  const result = final.messages.at(-1);
+  assert.equal(result.role, "tool");
+  assert.equal(result.tool_call_id, "call_fixture");
+  assert.deepEqual(JSON.parse(result.content), { entries: [{ name: "안내.md", directory: false }], limited: false });
+  assert.ok(!JSON.stringify(requests).includes("ags-shared-names-"));
+  assert.doesNotMatch(JSON.stringify(requests), /로컬에서만 볼 본문|hidden\.md/);
+  const logs = await (await req.get(`${base}/api/call-logs/export`, { headers })).json();
+  assert.equal(logs.length, 2);
+  assert.match(logs[1].body, /call_fixture/);
+  for (const log of logs) {
+    assert.equal(log.contextBudget.blockUsage.at(-1).block, "tool");
+    assert.equal(log.contextBudget.blockUsage.reduce((n, row) => n + row.estimatedTokens, 0), log.contextBudget.estimatedInput);
+  }
+  assert.match(logs[0].answer, /안내.md/);
+  await input.fill("이번에는 일반 대화");
+  await input.press("Enter");
+  await page.getByText("일반 답변", { exact: true }).waitFor();
+  assert.equal(requests.length, 3);
+  assert.ok(!requests[2].tools && !JSON.stringify(requests[2]).includes("안내.md"));
+  const ask = async message => (await req.post(`${url}/chat`, { headers,
+    data: { message, workspaceScope: scope, workspaceShare: "openai_root_names" } })).text();
+  assert.match(await ask("목록 없이 답해"), /직접 답변/);
+  assert.match(await ask("잘못된 도구"), /provider_failed/);
+  assert.equal(requests.length, 5);
+  assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: 5 } })).ok());
+  assert.match(await ask("출력 예산 소진"), /workspace_tool_budget/);
+  assert.equal(requests.length, 6);
+  assert.ok((await req.put(`${url}/context`, { headers, data: limits })).ok());
+  const pause = once(fake, "folder-decision");
+  const pending = await fetch(`${url}/chat`, { method: "POST", headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ message: "요청 중단 대기", workspaceScope: scope, workspaceShare: "openai_root_names" }) });
+  const [resume] = await pause;
+  try {
+    const cancelId = pending.headers.get("x-request-id");
+    assert.ok((await req.post(`${base}/api/chat/${cancelId}/cancel`, { headers })).ok());
+    assert.match(await pending.text(), /event: cancelled/);
+  } finally {
+    resume();
+  }
+  const waiting = once(fake, "folder-decision");
+  const changing = ask("폴더 변경 대기");
+  const [release] = await waiting;
+  try {
+    assert.ok((await req.put(`${base}/api/projects/${project.id}/root`, { headers, data: { previous: root, path: null } })).ok());
+  } finally {
+    release();
+  }
+  assert.match(await changing, /workspace_read_failed/);
+  assert.equal(requests.length, 8);
+  const activity = await (await req.get(`${base}/api/projects/${project.id}/activity`, { headers })).json();
+  assert.equal(activity.filter(row => row.action === "tool_list").length, 1);
+  assert.deepEqual(pageErrors, []);
+});

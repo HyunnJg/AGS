@@ -17,6 +17,7 @@ import { api, chatEvents } from "./api.ts";
 import {
   isModelSelection,
   providerNames,
+  workspaceToolModes,
   type ProviderOption,
   type ModelSelection,
 } from "../../../packages/contracts/src/providers.ts";
@@ -128,6 +129,7 @@ function Conversation({
     if (session.provider === option.id) models.add(session.model);
     for (const model of models) choices.push({ provider: option.id, model });
   }
+  const toolMode = workspaceToolModes[session.provider];
   const providerEnabled = options.some(option => option.id === session.provider && option.enabled);
   const reviewChoices = choices.filter(choice => options.some(o => o.id === choice.provider && o.enabled));
   const references = useFileReferences(token, session.id);
@@ -149,6 +151,8 @@ function Conversation({
     setLoadingGrant(true);
     try {
       const grant = await (await api(token, `${path}/workspace-read`, "GET", undefined, request.signal)).json();
+      if (grant.provider !== session.provider || grant.model !== session.model || grant.sectionId !== session.sectionId ||
+          grant.sectionRevision !== session.sectionRevision) throw new Error("대화 모델이나 소속이 바뀌었습니다. 새로고침 후 확인하세요.");
       if (!request.signal.aborted) setReadGrant(grant);
     } catch (e) {
       if (!request.signal.aborted) setError(problem(e));
@@ -247,9 +251,10 @@ function Conversation({
     setError("");
     let accepted = false;
     try {
-      const workspaceScope = session.sectionId && session.provider === "mock" ? readGrant?.scope : undefined;
+      const workspaceScope = session.sectionId && toolMode ? readGrant?.scope : undefined;
       setReadGrant(undefined);
-      const r = await api(token, `${path}/chat`, "POST", { message, workspaceScope });
+      const r = await api(token, `${path}/chat`, "POST", { message, workspaceScope,
+        ...(workspaceScope && toolMode === "share_root_list" && { workspaceShare: "openai_root_names" }) });
       accepted = true;
       const usage = r.headers.get("x-ags-memory-use");
       const label = usage ? memoryUseLabel(JSON.parse(usage)) : "";
@@ -276,12 +281,15 @@ function Conversation({
       for await (const event of chatEvents(r)) {
         if (event.type === "error") {
           const errors = {
+            workspace_tool_budget: "폴더 목록으로 답변을 이어갈 예산이 부족합니다. 입력·출력 한도를 확인하세요.",
             workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 작업 활동과 원본 파일을 확인하세요.",
             storage_failed: "대화 기록을 저장하지 못했습니다. 저장 공간을 확인하세요.",
             provider_auth: "공급자 API 키와 접근 권한을 확인하세요.",
             provider_limit: "공급자 요청 한도에 도달했습니다.",
             timeout: "응답 시간이 초과되었습니다.",
-            provider_failed: "공급자 응답을 완료하지 못했습니다. 모델 ID와 서버 설정을 확인하세요.",
+            provider_failed: workspaceScope && toolMode === "share_root_list"
+              ? "OpenAI 도구 요청을 완료하지 못했습니다. 모델의 함수 호출 지원 여부와 호출 로그를 확인하세요."
+              : "공급자 응답을 완료하지 못했습니다. 모델 ID와 서버 설정을 확인하세요.",
           };
           setError(errors[event.code]);
         }
@@ -398,11 +406,11 @@ function Conversation({
                   {providerNames[t.provider]} {t.model}
                 </small>
               </div>
-              {t.workspaceReads ? <>
+              {t.workspaceReads && t.provider === "mock" ? <>
                 <div className="reply">{t.reply}</div>
                 {t.reply && t.status !== "streaming" && <CopyText label="답변 복사" text={t.reply} />}
-                <WorkspaceReadDetails reads={t.workspaceReads} />
               </> : <ReplyText text={t.reply} rules={displayRules} finished={t.status !== "streaming" && visible} />}
+              {t.workspaceReads && <WorkspaceReadDetails reads={t.workspaceReads} />}
               {t.status !== "completed" && (
                 <div className="turn-status">
                   <small className="status">{turnStatusLabels[t.status]}</small>
@@ -426,11 +434,11 @@ function Conversation({
         {session.sectionId && <CheckpointEditor key={session.sectionRevision} token={token} session={session} />}
         {lastMemory && <small>{lastMemory}</small>}
         <AttachedReferences token={token} session={session.id} references={references} />
-        {session.sectionId && session.provider === "mock" && <div>
+        {session.sectionId && toolMode && <div>
           <label className="match-case"><input type="checkbox" checked={!!readGrant}
-            disabled={!ready || busy || remoteStreaming || loadingGrant || savingPreset}
-            onChange={() => void toggleRead()} />이번 요청에서 작업 폴더 읽기 허용</label>
-          {readGrant && <small>{readGrant.folder} · 문구 검색은 “검색어”, 목록 조회는 폴더 목록 또는 폴더 목록 “자료”를 입력하세요.</small>}
+            disabled={!providerEnabled || !ready || busy || remoteStreaming || loadingGrant || savingPreset}
+            onChange={() => void toggleRead()} />{toolMode === "local" ? "이번 요청에서 작업 폴더 읽기 허용" : "이번 요청에서 최상위 폴더·문서 이름을 OpenAI에 공유 허용"}</label>
+          {readGrant && <small>{readGrant.folder} · {toolMode === "local" ? "문구 검색은 “검색어”, 목록 조회는 폴더 목록 또는 폴더 목록 “자료”를 입력하세요." : "모델이 목록을 요청하면 이름을 전송합니다. OpenAI API 호출은 최대 2회입니다."}</small>}
         </div>}
         <form onSubmit={send}>
           <textarea

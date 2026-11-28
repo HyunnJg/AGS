@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { CallKind, CallLog, CallStatus, ReportedUsage } from "../../contracts/src/calls.ts";
-import type { Message } from "../../contracts/src/context.ts";
 import type { ModelSelection } from "../../contracts/src/providers.ts";
 
 const limit = 65536;
@@ -40,12 +39,25 @@ export class CallCapture {
   protect(...values: (string | undefined)[]) {
     for (const value of values) if (value) this.secrets.add(value);
   }
-  recordRequest(messages: Message[], maxTokens?: number | null) {
+  recordRequest(messages: { content: string }[], maxTokens?: number | null) {
     this.request = {
       messageCount: messages.length,
       contentBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.content, "utf8"), 0),
       maxTokens: maxTokens ?? null,
     };
+  }
+  recordCompatibleUsage(usage?: {
+    prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown; cache_write_tokens?: unknown };
+    completion_tokens_details?: { reasoning_tokens?: unknown };
+  }) {
+    if (!usage) return;
+    this.recordTokens("inputTokens", usage.prompt_tokens);
+    this.recordTokens("outputTokens", usage.completion_tokens);
+    this.recordTokens("totalTokens", usage.total_tokens);
+    this.recordTokens("cachedInputTokens", usage.prompt_tokens_details?.cached_tokens);
+    this.recordTokens("cacheWriteTokens", usage.prompt_tokens_details?.cache_write_tokens);
+    this.recordTokens("reasoningTokens", usage.completion_tokens_details?.reasoning_tokens);
   }
   recordTokens(field: keyof ReportedUsage, value: unknown) {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return;

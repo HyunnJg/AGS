@@ -4,6 +4,9 @@ import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
+import { folderCallBudget, openAiFolderTurn } from "./openai-folder-turn.ts";
+import { folderOfferCost } from "../../../packages/providers/src/openai-folder.ts";
+import type { WorkspaceRead } from "../../../packages/contracts/src/workspace.ts";
 import { workspaceScope, mockWorkspaceReply, mockWorkspaceRequest } from "./workspace-tools.ts";
 import { workspaceApi } from "./workspace-api.ts";
 import { checkKnowledgeSource } from "./knowledge-source.ts";
@@ -84,6 +87,9 @@ export function createChatServer(
   const authorization = Buffer.from(`Bearer ${token}`);
   const active = new Map<string, AbortController>();
 
+  function readScope(db: SessionStore, session: Session) {
+    return workspaceScope(db, session, session.provider === "openai" ? connections?.view("openai").revision : undefined);
+  }
   const checkpoints = new CheckpointService();
   function memoryFor(db: SessionStore, section: Session["sectionId"]) {
     return Promise.all([loadSectionState(db, section), loadCheckpoints(db, section)]);
@@ -448,9 +454,10 @@ export function createChatServer(
     if (route && !session) throw new RequestError(404, "unknown_session");
     if (session && store && route?.[2] === "/workspace-read") {
       if (req.method !== "GET") return allow("GET");
-      const grant = workspaceScope(store, session);
+      const grant = readScope(store, session);
       if (!grant) throw new RequestError(409, "workspace_read_unavailable");
-      return json({ scope: grant.scope, folder: grant.root.path });
+      return json({ scope: grant.scope, folder: grant.root.path, provider: session.provider, model: session.model,
+        sectionId: session.sectionId, sectionRevision: session.sectionRevision });
     }
     if (session && store && route?.[2] === "/delete-preview") {
       if (req.method !== "POST") return allow("POST");
@@ -628,10 +635,17 @@ export function createChatServer(
     if (session?.sectionRevision !== revisionAtAdmission) throw new RequestError(409, "session_section_changed");
     const context = session && store && state ? contextFor(store, session, message, state) : undefined;
     if (context && !context.fits) throw new RequestError(422, "input_budget_exceeded");
-    const scope = body.workspaceScope && store && session ? workspaceScope(store, session) : undefined;
+    const scope = body.workspaceScope && store && session ? readScope(store, session) : undefined;
     if (body.workspaceScope && (!scope || scope.scope !== body.workspaceScope))
       throw new RequestError(409, "workspace_read_unavailable");
-    const toolRequest = scope && mockWorkspaceRequest(message);
+    const externalList = !!scope && session?.provider === "openai";
+    if (externalList !== (body.workspaceShare === "openai_root_names"))
+      throw new RequestError(409, "workspace_read_unavailable");
+    if (externalList && context && context.inputCeiling !== null && context.estimatedInput + folderOfferCost > context.inputCeiling)
+      throw new RequestError(422, "workspace_tool_budget");
+    const toolRequest = scope && session?.provider === "mock" ? mockWorkspaceRequest(message) : undefined;
+    const admittedProviders = providers;
+    const openAiRevision = externalList ? connections?.view("openai").revision : undefined;
     const id = randomUUID();
     if (session && !store?.begin(session, id, message)) throw new RequestError(409, "session_busy");
     const controller = new AbortController();
@@ -670,11 +684,11 @@ export function createChatServer(
           }
         }, 150);
     }
-    const capture = store?.startCall(
+    let capture = store?.startCall(
       "chat",
       session ?? { provider: "mock", model: "" },
       session?.id ?? null,
-      session?.provider === "mock" ? undefined : context,
+      session?.provider === "mock" ? undefined : context && externalList ? folderCallBudget(context, folderOfferCost, 0) : context,
     );
     try {
       res.writeHead(200, {
@@ -686,21 +700,33 @@ export function createChatServer(
       });
       res.flushHeaders();
       let sequence = 0;
-      const reply = scope && toolRequest && store && session
-        ? mockWorkspaceReply(scope.root, toolRequest, () => {
-            signal.throwIfAborted();
-            const current = store.project(scope.project);
-            if (current?.root !== scope.root.path || current.identity !== scope.root.identity)
-              throw new WorkspaceError(409, "folder_changed");
-          }, read => {
-            try {
-              store.recordToolRead(id, scope.project, ++sequence, read);
-            } catch (error) {
-              storageFailed = true;
-              throw error;
-            }
-            capture?.workspaceRead(read);
-          })
+      function checkWorkspace() {
+        signal.throwIfAborted();
+        if (!scope || !store) throw new WorkspaceError(409, "workspace_read_unavailable");
+        const current = store.project(scope.project);
+        if (current?.root !== scope.root.path || current.identity !== scope.root.identity ||
+            (externalList && connections?.view("openai").revision !== openAiRevision))
+          throw new WorkspaceError(409, "folder_changed");
+      }
+      function recordRead(read: WorkspaceRead) {
+        if (!scope || !store) throw new WorkspaceError(409, "workspace_read_unavailable");
+        try {
+          store.recordToolRead(id, scope.project, ++sequence, read);
+        } catch (error) {
+          storageFailed = true;
+          throw error;
+        }
+        capture?.workspaceRead(read);
+      }
+      const reply = externalList && context && session && store && scope
+        ? openAiFolderTurn(admittedProviders, session, context, scope.root, signal, () => timer.refresh(),
+            checkWorkspace, recordRead, capture, extraInput => {
+              capture?.finish("completed");
+              capture = store.startCall("chat", session, session.id, folderCallBudget(context, extraInput, 2));
+              return capture;
+            })
+        : scope && toolRequest
+          ? mockWorkspaceReply(scope.root, toolRequest, checkWorkspace, recordRead)
         : session && session.provider !== "mock" && context
           ? providers.stream(
               session,
@@ -753,10 +779,9 @@ export function createChatServer(
                 code:
                   signal.reason === "timeout"
                     ? "timeout"
-                    : scope ? "workspace_read_failed"
-                    : error instanceof ProviderError
-                      ? error.code
-                      : "provider_failed",
+                    : error instanceof ProviderError ? error.code
+                    : error instanceof WorkspaceError && error.message === "workspace_tool_budget" ? "workspace_tool_budget"
+                    : scope ? "workspace_read_failed" : "provider_failed",
               };
         res.end(encodeEvent(terminal));
       }

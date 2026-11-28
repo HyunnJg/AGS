@@ -16,7 +16,7 @@ import type { ChatEvent } from "../../../packages/contracts/src/chat.ts";
 
 const workspaceMessages: Record<string, string> = {
   workspace_read_failed: "작업 폴더 조회를 마치지 못했습니다. 파일 변경 여부와 줄 길이를 확인하세요.",
-  workspace_read_unavailable: "현재 mock 대화와 연결 폴더를 확인한 뒤 읽기를 다시 허용하세요.",
+  workspace_read_unavailable: "현재 대화 모델과 연결 폴더를 확인한 뒤 읽기를 다시 허용하세요.",
   invalid_tool_folder: "폴더 목록 뒤에 큰따옴표로 감싼 상대 경로를 입력하세요. 숨김·제외 폴더는 조회할 수 없습니다.",
   invalid_tool_query: "찾을 문구를 큰따옴표 안에 1~120자로 입력하세요.",
   source_unavailable: "현재 연결 폴더에서 원본을 확인할 수 없습니다.",
@@ -153,6 +153,8 @@ export async function api(
       throw new Error("목록에 있던 호출이 삭제되었거나 보관 한도를 벗어났습니다. 목록을 새로고침한 뒤 다시 내려받으세요.");
     if (path === "/api/settings/presets" && res.status === 409)
       throw new Error("같은 이름의 프리셋이 있습니다. 다른 이름으로 저장하세요.");
+    if (res.status === 422 && (await res.clone().json().catch(() => ({}))).error === "workspace_tool_budget")
+      throw new Error("폴더 목록 도구에 필요한 입력 예산이 부족합니다. 컨텍스트 한도를 확인하세요.");
     if (res.status === 422)
       throw new Error(
         "현재 메시지와 지침이 입력 예산을 넘습니다. 입력·출력 예산을 조정하거나 메시지를 줄여 주세요.",
