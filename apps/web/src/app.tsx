@@ -669,6 +669,9 @@ function Workspace({ token }: { token: string }) {
         <ProjectWorkspace
           token={token}
           current={currentSession}
+          streaming={running.includes(id) || Boolean(id && remoteId === id)}
+          onSectionLinked={linked => setSessions(prev => prev.map(s => s.id === linked.id
+            ? { ...s, sectionId: linked.sectionId, sectionLabel: linked.sectionLabel } : s))}
           sessions={sessions}
           close={() => setProjectsOpen(false)}
           openSession={(s) => {
@@ -720,7 +723,8 @@ function Workspace({ token }: { token: string }) {
               if (item.id !== patch.id) return item;
               // A chat refresh can arrive after an explicit rename has already succeeded.
               const title = previousTitle === undefined || previousTitle === item.title ? patch.title : item.title;
-              return { ...item, ...patch, title: title ?? item.title };
+              return { ...item, ...patch, sectionId: item.sectionId ?? patch.sectionId,
+                sectionLabel: item.sectionLabel ?? patch.sectionLabel, title: title ?? item.title };
             }))}
           />
         ))

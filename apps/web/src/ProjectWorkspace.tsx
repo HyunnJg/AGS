@@ -467,12 +467,16 @@ export function ProjectWorkspace({
   current,
   close,
   openSession,
+  onSectionLinked,
+  streaming,
 }: {
   token: string;
   sessions: Session[];
   current?: Session | undefined;
   close: () => void;
   openSession: (session: Session) => void;
+  onSectionLinked: (session: Session) => void;
+  streaming: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<"files" | "knowledge" | "activity">("files");
@@ -531,6 +535,25 @@ export function ProjectWorkspace({
     setCatalog(data);
     if (id !== project?.id) choose(id);
   }
+  async function linkCurrentSession() {
+    if (!current || current.sectionId || !section || busy) return;
+    const path = `/api/sessions/${current.id}`;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await api(token, `${path}/section`, "PUT", { sectionId: section.id });
+      onSectionLinked(await response.json());
+    } catch (e) {
+      setError(message(e));
+      try {
+        const data = await (await api(token, path)).json();
+        onSectionLinked(data.session);
+      } catch { /* Preserve the original error if the session cannot be refreshed. */ }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createSession() {
     if (!section || busy) return;
     setBusy(true);
@@ -625,6 +648,11 @@ export function ProjectWorkspace({
               <button className="primary" type="button" disabled={busy} onClick={() => void createSession()}>
                 섹션에서 새 대화
               </button>
+              {current && !current.sectionId && section && (
+                <button type="button" disabled={busy || streaming} onClick={() => void linkCurrentSession()}>
+                  현재 대화를 ‘{section.name}’ 섹션에 연결
+                </button>
+              )}
               {sessions
                 .filter((s) => s.sectionId === section?.id && !s.archived)
                 .map((s) => (

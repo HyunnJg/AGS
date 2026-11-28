@@ -728,6 +728,7 @@ test(
       await page.getByRole("dialog").getByRole("button", { name: "첫 작업", exact: true }).count(),
       0,
     );
+    const selectedSectionId = await page.getByLabel("섹션 선택").inputValue();
     const projectId = await page.getByLabel("프로젝트 선택").inputValue();
     const projectPath = `${base}/api/projects/${projectId}`;
     const headers = { authorization: `Bearer ${token}` };
@@ -995,6 +996,18 @@ test(
     assert.equal(restored.memoryUse.summaries,1);
     assert.ok(restored.messages.some(m=>m.content.includes("다음: 자료 대조")));
     assert.ok(restored.messages.some((m,i) => restored.blocks[i] === "memory" && m.content.includes("발굴 조사 연표")));
+    // Linking an existing session should assemble the same section memory as starting one there.
+    const unassigned = await (await page.request.post(`${base}/api/sessions`, {headers, data:{provider:"mock",model:""}})).json();
+    const linkPath = `${base}/api/sessions/${unassigned.id}`;
+    const previewLink = async () => (await page.request.post(`${linkPath}/context-preview`, {
+      headers, data: {message:"섹션 복원 검증", limits:{turns:0,inputBudget:null,outputBudget:null}},
+    })).json();
+    assert.equal((await previewLink()).memoryUse.state, false);
+    const target = (await (await page.request.get(freshPath, {headers})).json()).session.sectionId;
+    assert.ok((await page.request.put(`${linkPath}/section`, {headers, data:{sectionId:target}})).ok());
+    const linkedPreview = await previewLink();
+    assert.deepEqual(linkedPreview.memoryUse, restored.memoryUse);
+    assert.ok(linkedPreview.messages.some(m => m.content.includes("발굴 조사 연표")));
     const connectionPath = `${base}/api/settings/connections/custom`;
     const connection = await (await page.request.get(connectionPath, { headers })).json();
     assert.equal(connection.defaultModel, "ui/test-model");
@@ -1514,6 +1527,7 @@ test(
     const interruptedTurn = page.getByRole("article").filter({hasText:interruptedQuestion});
     await interruptedTurn.getByText("응답 중", {exact:true}).waitFor();
     assert.equal(await interruptedTurn.getByRole("button", {name:"답변 복사"}).count(), 0);
+    assert.equal((await page.request.put(`${sessionUrl}/section`, {headers, data:{sectionId:selectedSectionId}})).status(), 409);
     assert.equal((await page.request.put(`${sessionUrl}/archive`, {headers, data:{archived:true}})).status(), 409);
     assert.equal(await interruptedTurn.getByRole("button", {name:"질문 다시 편집"}).count(), 0);
     await stop("SIGKILL");
@@ -1564,6 +1578,23 @@ test(
     const restore = page.getByRole("button", { name: "보관함에서 복원", exact: true });
     assert.equal((await page.request.put(archiveUrl, { data:{archived:true} })).status(), 401);
     await composer.fill("보관한 초안");
+    const sectionUrl = `${base}/api/sessions/${later.id}/section`;
+    assert.equal((await page.request.put(sectionUrl, {data:{sectionId:selectedSectionId}})).status(), 401);
+    assert.equal((await page.request.put(sectionUrl, {headers, data:{sectionId:"missing"}})).status(), 400);
+    const beforeLink = await (await page.request.get(`${base}/api/sessions/${later.id}`, {headers})).json();
+    await openWorkspace();
+    await panel.getByLabel("프로젝트 선택").selectOption(projectId);
+    await panel.getByLabel("섹션 선택").selectOption(selectedSectionId);
+    await panel.getByRole("button", {name:"현재 대화를 ‘사료 검토’ 섹션에 연결"}).click();
+    await panel.getByRole("button", {name:literal, exact:true}).waitFor();
+    const linked = await (await page.request.get(`${base}/api/sessions/${later.id}`, {headers})).json();
+    assert.equal(linked.session.sectionId, selectedSectionId);
+    assert.deepEqual(linked.turns, beforeLink.turns);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("ags-session")), later.id);
+    const otherSection = await panel.getByLabel("섹션 선택").getByRole("option", {name:"일반", exact:true}).getAttribute("value");
+    assert.equal((await page.request.put(sectionUrl, {headers, data:{sectionId:otherSection}})).status(), 409);
+    await panel.getByRole("button", {name:"작업공간 닫기"}).click();
+    assert.equal(await composer.inputValue(), "보관한 초안");
     await archive.click();
     await restore.waitFor();
     assert.equal(await sessionNav.getByRole("button", {name:literal, exact:true}).count(), 0);
@@ -1574,6 +1605,7 @@ test(
     await restore.waitFor();
     await page.getByRole("button", {name:"보관함 보기"}).click();
     await sessionNav.getByRole("button", {name:literal, exact:true}).click();
+    await page.locator(".conversation:visible header").getByText(linked.session.sectionLabel, {exact:true}).waitFor();
     assert.equal(await composer.inputValue(), "보관한 초안");
     await openSearch.click();
     await searchDialog.getByLabel("본문 검색어").fill(literal);
