@@ -1795,7 +1795,7 @@ test("mock 대화에서 한 번 허용한 폴더 검색의 근거와 기록을 �
 });
 
 const sharingProviders = {
-  openai: { label: /OpenAI에 공유 허용/, endpoint: "/openai/v1/chat/completions" },
+  openai: { label: /OpenAI에 공유 허용/, endpoint: "/openai/v1/responses" },
   anthropic: { label: /Claude\)에 공유 허용/, endpoint: "/anthropic/v1/messages" },
   gemini: { label: /Google Gemini에 공유 허용/, endpoint: "/gemini/v1beta/models/fixture:generateContent" },
 };
@@ -1804,18 +1804,23 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
   const gemini = provider === "gemini";
   const share = `${provider}_root_names`;
   const requests = [];
+  const reasoning = { type: "reasoning", id: "rs_fixture", summary: [], encrypted_content: "opaque-fixture" };
+  const outputMessage = text => ({ type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] });
   const thinking = { type: "thinking", thinking: "fixture", signature: "synthetic-signature" };
   const fake = createServer(async (req, res) => {
     const decisionPath = sharingProviders[provider].endpoint;
     const streamPath = gemini ? "/gemini/v1beta/models/fixture:streamGenerateContent?alt=sse" : decisionPath;
-    if (req.url !== decisionPath && req.url !== streamPath) return res.writeHead(404).end();
+    const plainChat = provider === "openai" && req.url === "/openai/v1/chat/completions";
+    if (req.url !== decisionPath && req.url !== streamPath && !plainChat) return res.writeHead(404).end();
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
+    if (provider === "openai" && (plainChat ? !body.messages || body.tools : !Array.isArray(body.input) || body.store !== false))
+      return res.writeHead(400).end();
     requests.push(body);
     const offering = gemini ? req.url === decisionPath : body.tools && body.tool_choice?.type !== "none";
     if (offering) {
-      const ask = gemini ? body.contents.at(-1).parts.at(-1).text : body.messages.at(-1).content;
+      const ask = gemini ? body.contents.at(-1).parts.at(-1).text : (body.input ?? body.messages).at(-1).content;
       if (ask === "폴더 변경 대기" || ask === "요청 중단 대기") await new Promise(resolve => fake.emit("folder-decision", resolve));
       if (gemini) {
         const parts = ask === "목록 없이 답해" ? [{ text: "직접 답변" }] : [{
@@ -1835,21 +1840,14 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
         }));
         return;
       }
-      const msg = { role: "assistant", content: null, tool_calls: [
-        { id: "call_fixture", type: "function", function: { name: "list_entries", arguments: "{}" } },
-      ] };
-      if (ask === "잘못된 도구") msg.tool_calls[0].function.name = "unknown";
-      if (ask === "목록 없이 답해") {
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
-          choices: [{ finish_reason: "stop", message: { role: "assistant", content: "직접 답변" } }],
-        }));
-      } else {
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
-          choices: [{ finish_reason: "tool_calls", message: msg }], usage: { prompt_tokens: 30, completion_tokens: 5 },
-        }));
-      }
+      const tool = { type: "function_call", id: "fc_fixture", call_id: "call_fixture", status: "completed",
+        name: ask === "잘못된 도구" ? "unknown" : "list_entries", arguments: "{}" };
+      const output = ask === "목록 없이 답해" ? [outputMessage("직접 답변")] : [reasoning, tool];
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        status: "completed", output, usage: { input_tokens: 30, output_tokens: 5, output_tokens_details: { reasoning_tokens: 2 }, total_tokens: 35 },
+      }));
     } else {
-      const usingResult = body.toolConfig?.functionCallingConfig.mode === "NONE" || body.tool_choice?.type === "none" || body.messages?.at(-1).role === "tool";
+      const usingResult = body.toolConfig?.functionCallingConfig.mode === "NONE" || body.tool_choice?.type === "none" || body.input?.at(-1).type === "function_call_output";
       const content = usingResult ? "자료 목록에 안내.md가 있습니다." : "일반 답변";
       if (gemini) {
         const event = { candidates: [{ finishReason: "STOP", content: { role: "model", parts: [{ text: content }] } }] };
@@ -1860,6 +1858,11 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
           { type: "message_delta", delta: { stop_reason: "end_turn" } }, { type: "message_stop" }];
         res.writeHead(200, { "content-type": "text/event-stream" }).end(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""));
         return;
+      }
+      if (!plainChat) {
+        const events = [{ type: "response.output_text.delta", delta: content }, { type: "response.completed",
+          response: { status: "completed", output: [outputMessage(content)], usage: { output_tokens: 10 } } }];
+        return res.writeHead(200, { "content-type": "text/event-stream" }).end(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""));
       }
       res.writeHead(200, { "content-type": "text/event-stream" })
         .end(`data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
@@ -1940,15 +1943,21 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
     assert.equal(last.content[0].tool_use_id, "call_fixture");
     content = last.content[0].content;
   } else {
-    assert.deepEqual(requests[0].tools.map(t => t.function.name), ["list_entries"]);
+    assert.deepEqual(requests[0].tools.map(t => t.name), ["list_entries"]);
     assert.equal(requests[0].parallel_tool_calls, false);
+    assert.equal(requests[0].store, false);
+    assert.equal(requests[0].max_output_tokens, 100);
     assert.equal(final.tools, undefined);
-    assert.equal(final.max_completion_tokens, 95);
-    assert.equal(final.messages.at(-2).tool_calls[0].id, "call_fixture");
-    const result = final.messages.at(-1);
-    assert.equal(result.role, "tool");
-    assert.equal(result.tool_call_id, "call_fixture");
-    content = result.content;
+    assert.equal(final.previous_response_id, undefined);
+    assert.equal(final.store, false);
+    assert.equal(final.max_output_tokens, 95);
+    assert.deepEqual(final.input.slice(0, -3), requests[0].input);
+    assert.deepEqual(final.input.at(-3), reasoning);
+    assert.equal(final.input.at(-2).call_id, "call_fixture");
+    const result = final.input.at(-1);
+    assert.equal(result.type, "function_call_output");
+    assert.equal(result.call_id, "call_fixture");
+    content = result.output;
   }
   assert.deepEqual(JSON.parse(content), { entries: [{ name: "안내.md", directory: false }], limited: false });
   assert.ok(!JSON.stringify(requests).includes("ags-shared-names-"));
@@ -1956,6 +1965,13 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
   const logs = await (await req.get(`${base}/api/call-logs/export`, { headers })).json();
   assert.equal(logs.length, 2);
   assert.match(logs[1].body, /call_fixture/);
+  if (provider === "openai") {
+    assert.equal(logs[0].contextBudget.blockUsage.at(-1).includedMessages, 3);
+    assert.equal(logs[0].request.maxTokens, 95);
+    assert.equal(logs[1].usage.reasoningTokens, 2);
+    assert.equal(logs[1].usage.outputTokens, 5);
+    assert.equal(logs[0].usage.outputTokens, 10);
+  }
   for (const log of logs) {
     assert.equal(log.contextBudget.blockUsage.at(-1).block, "tool");
     assert.equal(log.contextBudget.blockUsage.reduce((n, row) => n + row.estimatedTokens, 0), log.contextBudget.estimatedInput);
@@ -1971,7 +1987,12 @@ for (const provider of Object.keys(sharingProviders)) test(`${provider}에 허�
   assert.match(await ask("목록 없이 답해"), /직접 답변/);
   assert.match(await ask("잘못된 도구"), /provider_failed/);
   assert.equal(requests.length, 5);
-  assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: 5 } })).ok());
+  if (provider === "openai") {
+    assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: 15 } })).ok());
+    assert.match(await ask("첫 호출 최소 예산 미달"), /workspace_tool_budget/);
+    assert.equal(requests.length, 5);
+  }
+  assert.ok((await req.put(`${url}/context`, { headers, data: { ...limits, outputBudget: provider === "openai" ? 20 : 5 } })).ok());
   assert.match(await ask("출력 예산 소진"), /workspace_tool_budget/);
   assert.equal(requests.length, 6);
   assert.ok((await req.put(`${url}/context`, { headers, data: limits })).ok());

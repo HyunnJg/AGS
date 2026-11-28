@@ -4,7 +4,7 @@ import { runReview } from "./reviews.ts";
 import { type Connections, ConnectionError } from "./connections.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { loadSectionState, loadCheckpoints } from "./section-state.ts";
-import { folderCallBudget, providerFolderTurn } from "./folder-turn.ts";
+import { folderCallBudget, folderOutputFits, providerFolderTurn } from "./folder-turn.ts";
 import { folderOfferCost } from "../../../packages/providers/src/folder-tools.ts";
 import type { WorkspaceRead } from "../../../packages/contracts/src/workspace.ts";
 import { workspaceScope, mockWorkspaceReply, mockWorkspaceRequest } from "./workspace-tools.ts";
@@ -642,7 +642,8 @@ export function createChatServer(
     const offerCost = folderProvider ? folderOfferCost(folderProvider) : 0;
     if (body.workspaceShare !== (folderProvider ? folderShareFlags[folderProvider] : undefined))
       throw new RequestError(409, "workspace_read_unavailable");
-    if (folderProvider && context && context.inputCeiling !== null && context.estimatedInput + offerCost > context.inputCeiling)
+    if (folderProvider && context && (!folderOutputFits(folderProvider, context.outputBudget) ||
+        (context.inputCeiling !== null && context.estimatedInput + offerCost > context.inputCeiling)))
       throw new RequestError(422, "workspace_tool_budget");
     const toolRequest = scope && session?.provider === "mock" ? mockWorkspaceRequest(message) : undefined;
     const admittedProviders = providers;
@@ -721,9 +722,9 @@ export function createChatServer(
       }
       const reply = folderProvider && context && session && store && scope
         ? providerFolderTurn(admittedProviders, session, context, scope.root, signal, () => timer.refresh(),
-            checkWorkspace, recordRead, capture, extraInput => {
+            checkWorkspace, recordRead, capture, (extraInput, extraMessages) => {
               capture?.finish("completed");
-              capture = store.startCall("chat", session, session.id, folderCallBudget(context, extraInput, 2));
+              capture = store.startCall("chat", session, session.id, folderCallBudget(context, extraInput, extraMessages));
               return capture;
             })
         : scope && toolRequest

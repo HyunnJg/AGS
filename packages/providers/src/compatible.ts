@@ -1,3 +1,4 @@
+import { responsesPayload, responsesReply } from "./openai-responses.ts";
 import { claudeFolderFinal, geminiFolderFinal, type FolderFollowup, requestFolderDecision } from "./folder-tools.ts";
 import type { CallCapture } from "./capture.ts";
 import { anthropicPayload, anthropicReply, defaultClaudeOutput } from "./anthropic.ts";
@@ -73,15 +74,12 @@ async function* eventData(body: ReadableStream<Uint8Array>, onActivity?: () => v
   }
 }
 
-async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture, finalFolderRound = false) {
+async function* compatibleReply(events: AsyncIterable<string>, capture?: CallCapture) {
   for await (const data of events) {
     if (data.trim() === "[DONE]") return;
     const chunk = JSON.parse(data);
     capture?.recordCompatibleUsage(chunk.usage);
     const choice = chunk.choices?.[0];
-    if (finalFolderRound && (choice?.delta?.tool_calls || choice?.delta?.function_call ||
-      choice?.finish_reason === "tool_calls" || choice?.finish_reason === "function_call"))
-      throw new ProviderError("provider_failed");
     if (chunk.error || choice?.finish_reason === "error") throw new ProviderError("provider_failed");
     const content = choice?.delta?.content;
     if (typeof content === "string" && content) yield content;
@@ -141,7 +139,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
       if (folderResult && provider !== folderResult.provider) throw new ProviderError("provider_failed");
       let path = "chat/completions";
       let payload: Record<string, unknown>;
-      let reply = compatibleReply;
+      let reply: (events: AsyncIterable<string>, capture?: CallCapture, finalRound?: boolean) => AsyncIterable<string> = compatibleReply;
       if (provider === "anthropic") {
         path = "messages";
         outputBudget ??= defaultClaudeOutput;
@@ -155,11 +153,15 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
           ? { ...initial, ...geminiFolderFinal, contents: [...initial.contents, ...folderResult.contents] }
           : initial;
         reply = geminiReply;
+      } else if (folderResult?.provider === "openai") {
+        path = "responses";
+        payload = { ...responsesPayload(model, [...messages, ...folderResult.items], outputBudget), stream: true };
+        reply = responsesReply;
       } else {
         payload = {
           model,
           stream: true,
-          messages: folderResult?.provider === "openai" ? [...messages, ...folderResult.messages] : messages,
+          messages,
           ...(provider === "openai" && { stream_options: { include_usage: true } }),
           ...(outputBudget != null && {
             [provider === "openai" ? "max_completion_tokens" : "max_tokens"]: outputBudget,
@@ -167,9 +169,10 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
         };
       }
       if (capture) {
-        const extra = folderResult?.provider === "gemini"
+        const extra = folderResult?.provider === "openai" ? folderResult.items.map(item => ({ content: JSON.stringify(item) }))
+          : folderResult?.provider === "gemini"
           ? folderResult.contents.map(turn => ({ content: JSON.stringify(turn.parts) }))
-          : folderResult?.messages.map(m => ({ content: Array.isArray(m.content) ? JSON.stringify(m.content) : m.content ?? "" })) ?? [];
+          : folderResult?.messages.map(m => ({ content: JSON.stringify(m.content) })) ?? [];
         capture.recordRequest([...messages, ...extra], outputBudget);
       }
       const response = await send(new URL(path, url).href, {
@@ -214,7 +217,7 @@ export function configureProviders(env: NodeJS.ProcessEnv, send: typeof fetch = 
     const { url, key } = endpoint(provider);
     if (!url || !isFolderProvider(provider) || !isModelSelection(selection)) throw new ProviderError("provider_failed");
     protect(capture);
-    const path = { openai: "chat/completions", anthropic: "messages", gemini: `models/${selection.model}:generateContent` }[provider];
+    const path = { openai: "responses", anthropic: "messages", gemini: `models/${selection.model}:generateContent` }[provider];
     return requestFolderDecision(provider, send, new URL(path, url).href, providerHeaders(provider, key),
       selection.model, messages, signal, onActivity, maxTokens, capture);
   }
